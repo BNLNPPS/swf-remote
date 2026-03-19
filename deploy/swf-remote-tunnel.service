@@ -1,0 +1,14 @@
+[Unit]
+Description=SSH tunnel to pandaserver02 for swf-remote
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=admin
+Environment=AUTOSSH_GATETIME=0
+ExecStart=/usr/bin/autossh -M 0 -N -o "ServerAliveInterval=30" -o "ServerAliveCountMax=3" -o "ExitOnForwardFailure=yes" -L 18443:localhost:443 pandaserver02
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

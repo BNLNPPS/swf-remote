@@ -1,3 +1,10 @@
+# Symlinks created by setup-dev.sh (point to swf-monitor)
+src/monitor_templates/
+src/remote_app/static
+
+# Deployment artifacts
+staticfiles/
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[codz]
