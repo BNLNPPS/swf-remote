@@ -25,4 +25,6 @@ urlpatterns = [
 
     path('panda/diagnostics/', views.panda_diagnostics_list, name='panda_diagnostics_list'),
     path('panda/diagnostics/datatable/', views.panda_diagnostics_datatable_ajax, name='panda_diagnostics_datatable_ajax'),
+
+    path('panda/view-text/', views.panda_view_text, name='panda_view_text'),
 ]

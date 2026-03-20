@@ -5,6 +5,7 @@ Page views render the same templates as swf-monitor (shared via symlink).
 DataTables AJAX and filter-count views proxy to swf-monitor through the tunnel.
 """
 
+from django.http import HttpResponse
 from django.shortcuts import render
 from django.urls import reverse
 
@@ -199,3 +200,52 @@ def panda_diagnostics_list(request):
 
 def panda_diagnostics_datatable_ajax(request):
     return monitor_client.proxy(request, '/panda/diagnostics/datatable/')
+
+
+def panda_view_text(request):
+    """Fetch a PanDA transformation URL — self-extracting zip with embedded scripts.
+
+    Extracts the bash header and all text files from the zip, presents them
+    as readable plain text.
+    """
+    import httpx
+    import io
+    import zipfile
+    url = request.GET.get('url', '')
+    if not url or not url.startswith('https://'):
+        return HttpResponse('Missing or invalid url parameter', status=400, content_type='text/plain')
+    try:
+        resp = httpx.get(url, timeout=15, follow_redirects=True)
+    except Exception as e:
+        return HttpResponse(f'Failed to fetch: {e}', status=502, content_type='text/plain')
+    data = resp.content
+    parts = []
+    # Extract the bash header (text before binary zip data)
+    try:
+        lines = []
+        for line in data.split(b'\n'):
+            try:
+                lines.append(line.decode('utf-8'))
+            except UnicodeDecodeError:
+                break
+        if lines:
+            parts.append(f'=== Shell header ({len(lines)} lines) ===\n')
+            parts.append('\n'.join(lines))
+    except Exception:
+        pass
+    # Extract text files from the zip
+    try:
+        buf = io.BytesIO(data)
+        with zipfile.ZipFile(buf) as zf:
+            for name in zf.namelist():
+                try:
+                    content = zf.read(name).decode('utf-8')
+                    parts.append(f'\n\n=== {name} ===\n')
+                    parts.append(content)
+                except (UnicodeDecodeError, KeyError):
+                    parts.append(f'\n\n=== {name} (binary, skipped) ===\n')
+    except zipfile.BadZipFile:
+        if not parts:
+            # Not a zip, just serve as text
+            parts.append(data.decode('utf-8', errors='replace'))
+    return HttpResponse(''.join(parts), content_type='text/plain; charset=utf-8')
