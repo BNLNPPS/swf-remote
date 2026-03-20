@@ -129,14 +129,7 @@ def panda_jobs_filter_counts(request):
 
 
 def panda_job_detail(request, pandaid):
-    data = monitor_client.study_job(pandaid)
-    if 'error' in data:
-        return render(request, 'monitor_app/panda_job_detail.html',
-                      {'error': data['error'], 'pandaid': pandaid})
-    data['pandaid'] = pandaid
-    job = data.get('job') or {}
-    job['transformation_is_url'] = (job.get('transformation') or '').startswith(('http://', 'https://'))
-    return render(request, 'monitor_app/panda_job_detail.html', data)
+    return monitor_client.proxy(request, f'/panda/jobs/{pandaid}/')
 
 
 # ── Tasks ────────────────────────────────────────────────────────────────────
@@ -171,13 +164,7 @@ def panda_tasks_filter_counts(request):
 
 
 def panda_task_detail(request, jeditaskid):
-    data = monitor_client.get_task(jeditaskid)
-    if isinstance(data, dict) and 'error' in data:
-        return render(request, 'monitor_app/panda_task_detail.html',
-                      {'error': data['error'], 'jeditaskid': jeditaskid})
-    return render(request, 'monitor_app/panda_task_detail.html', {
-        'task': data, 'jeditaskid': jeditaskid,
-    })
+    return monitor_client.proxy(request, f'/panda/tasks/{jeditaskid}/')
 
 
 # ── Errors & Diagnostics ────────────────────────────────────────────────────

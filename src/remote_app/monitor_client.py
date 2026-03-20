@@ -15,6 +15,7 @@ from django.http import HttpResponse
 logger = logging.getLogger(__name__)
 
 TIMEOUT = 30
+UPSTREAM_HEADERS = {'Host': 'pandaserver02.sdcc.bnl.gov'}
 
 
 def _base():
@@ -30,12 +31,17 @@ def proxy(request, path):
     url = f"{_base()}{path}"
     params = request.GET.dict()
     try:
-        resp = httpx.get(url, params=params, timeout=TIMEOUT, verify=False)
-        return HttpResponse(
-            resp.content,
-            status=resp.status_code,
-            content_type=resp.headers.get('content-type', 'application/json'),
-        )
+        resp = httpx.get(url, params=params, timeout=TIMEOUT, verify=False, headers=UPSTREAM_HEADERS)
+        body = resp.content
+        ct = resp.headers.get('content-type', 'application/json')
+        # Rewrite upstream paths to match our proxy URL structure
+        if b'/swf-monitor/' in body:
+            body = body.replace(b'/swf-monitor/', b'/')
+        # Rewrite upstream hashed static CSS to our local path
+        if b'/static/css/style.' in body:
+            import re as _re
+            body = _re.sub(rb'/static/css/style\.[a-f0-9]+\.css', b'/static/css/style.css', body)
+        return HttpResponse(body, status=resp.status_code, content_type=ct)
     except httpx.ConnectError as e:
         logger.error(f"Cannot reach swf-monitor at {url}: {e}")
         return HttpResponse(
@@ -54,7 +60,7 @@ def _get(path, params=None):
     """GET request to swf-monitor, return parsed JSON dict."""
     url = f"{_base()}{path}"
     try:
-        resp = httpx.get(url, params=params, timeout=TIMEOUT, verify=False)
+        resp = httpx.get(url, params=params, timeout=TIMEOUT, verify=False, headers=UPSTREAM_HEADERS)
         resp.raise_for_status()
         return resp.json()
     except httpx.ConnectError as e:
