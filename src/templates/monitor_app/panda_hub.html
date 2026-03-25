@@ -1,13 +1,14 @@
 {% extends 'base.html' %}
 
-{% block title %}PanDA Hub - ePIC Monitor{% endblock %}
+{% block title %}ePIC Production Monitor{% endblock %}
 
 {% block content %}
 <div class="container mt-4">
-    <h1 class="mb-4">ePIC PanDA Monitor</h1>
-    <p class="lead mb-5">Production monitoring for the ePIC experiment at the Electron Ion Collider</p>
+    <h1 class="mb-4">ePIC Production Monitor</h1>
+    <p class="lead mb-4">Production monitoring for the ePIC experiment at the Electron Ion Collider</p>
 
-    <div class="row">
+    <h4 class="mb-3">PanDA Production</h4>
+    <div class="row mb-4">
         <div class="col-md-4 mb-3">
             <div class="card h-100">
                 <div class="card-body">
@@ -45,6 +46,34 @@
                 <div class="card-body">
                     <p class="mb-2"><strong><a href="{% url 'monitor_app:panda_diagnostics_list' %}" class="text-decoration-none">Diagnostics</a></strong></p>
                     <p class="card-text">Failed jobs with full error details for debugging production issues.</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <h4 class="mb-3">Physics Configuration System</h4>
+    <div class="row">
+        <div class="col-md-4 mb-3">
+            <div class="card h-100">
+                <div class="card-body">
+                    <p class="mb-2"><strong><a href="{% url 'monitor_app:pcs_hub' %}" class="text-decoration-none">PCS Hub</a></strong></p>
+                    <p class="card-text">Physics configuration tags, datasets, and production config management.</p>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-4 mb-3">
+            <div class="card h-100">
+                <div class="card-body">
+                    <p class="mb-2"><strong><a href="{% url 'monitor_app:pcs_tag_compose' tag_type='p' %}" class="text-decoration-none">Physics Tags</a></strong></p>
+                    <p class="card-text">Browse and compose physics process configuration tags.</p>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-4 mb-3">
+            <div class="card h-100">
+                <div class="card-body">
+                    <p class="mb-2"><strong><a href="{% url 'monitor_app:pcs_datasets_list' %}" class="text-decoration-none">Datasets</a></strong></p>
+                    <p class="card-text">Production datasets composed from locked configuration tags.</p>
                 </div>
             </div>
         </div>

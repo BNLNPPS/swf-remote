@@ -58,17 +58,16 @@ elif [ -f "$BASE_TARGET" ]; then
     echo "Base template symlink created: base_monitor.html -> $BASE_TARGET"
 fi
 
-# ── Static files symlink ────────────────────────────────────────────────────
+# ── Static files ───────────────────────────────────────────────────────────
+# swf-remote has its own static/css/style.css (not symlinked from swf-monitor).
+# Remove legacy symlink if present.
 
-STATIC_LINK="$SRC_DIR/remote_app/static"
-STATIC_TARGET="$SWF_MONITOR/src/monitor_app/static"
-
-if [ -d "$STATIC_TARGET" ] && [ ! -e "$STATIC_LINK" ]; then
-    ln -s "$STATIC_TARGET" "$STATIC_LINK"
-    echo "Static files symlink created"
-elif [ -L "$STATIC_LINK" ]; then
-    echo "Static files symlink OK"
+STATIC_DIR="$SRC_DIR/remote_app/static"
+if [ -L "$STATIC_DIR" ]; then
+    echo "Removing legacy static symlink (swf-remote now has its own static files)"
+    rm "$STATIC_DIR"
 fi
+echo "Static files: $STATIC_DIR (own copy)"
 
 # ── Python venv ─────────────────────────────────────────────────────────────
 

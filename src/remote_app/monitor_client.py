@@ -100,3 +100,34 @@ def list_tasks(**kwargs):
 
 def get_task(jeditaskid):
     return _get(f'/api/panda/tasks/{jeditaskid}/')
+
+
+# ── PCS data accessors ────────────────────────────────────────────────────
+
+TAG_TYPE_MAP = {'p': 'physics-tags', 'e': 'evgen-tags', 's': 'simu-tags', 'r': 'reco-tags'}
+
+
+def list_tags(tag_type, **kwargs):
+    endpoint = TAG_TYPE_MAP.get(tag_type, f'{tag_type}-tags')
+    return _get(f'/pcs/api/{endpoint}/', kwargs)
+
+
+def get_tag(tag_type, tag_number):
+    endpoint = TAG_TYPE_MAP.get(tag_type, f'{tag_type}-tags')
+    return _get(f'/pcs/api/{endpoint}/{tag_number}/')
+
+
+def list_datasets(**kwargs):
+    return _get('/pcs/api/datasets/', kwargs)
+
+
+def get_dataset(pk):
+    return _get(f'/pcs/api/datasets/{pk}/')
+
+
+def list_prod_configs(**kwargs):
+    return _get('/pcs/api/prod-configs/', kwargs)
+
+
+def get_prod_config(pk):
+    return _get(f'/pcs/api/prod-configs/{pk}/')
