@@ -203,81 +203,29 @@ def panda_diagnostics_datatable_ajax(request):
 
 
 # ── PCS (Physics Configuration System) ─────────────────────────────────────
-# All PCS views proxy full rendered HTML from swf-monitor. The upstream
-# response uses swf-monitor's base.html and pcs: URL namespace, with paths
-# like /swf-monitor/pcs/... that our proxy() rewrites to /pcs/... .
+# All PCS views proxy full rendered HTML from swf-monitor. Single handler
+# forwards based on request path — no need for per-view functions.
 
-def pcs_hub(request):
-    return monitor_client.proxy(request, '/pcs/')
-
-
-def pcs_categories_list(request):
-    return monitor_client.proxy(request, '/pcs/categories/')
-
-
-def pcs_tag_compose(request, tag_type):
-    return monitor_client.proxy(request, f'/pcs/tags/{tag_type}/compose/')
-
-
-def pcs_tag_param_defs(request, tag_type):
-    return monitor_client.proxy(request, f'/pcs/tags/{tag_type}/param-defs/')
-
-
-def pcs_tags_list(request, tag_type):
-    return monitor_client.proxy(request, f'/pcs/tags/{tag_type}/')
-
-
-def pcs_tags_datatable_ajax(request, tag_type):
-    return monitor_client.proxy(request, f'/pcs/tags/{tag_type}/datatable/')
-
-
-def pcs_tag_detail(request, tag_type, tag_number):
-    return monitor_client.proxy(request, f'/pcs/tags/{tag_type}/{tag_number}/')
-
-
-def pcs_tag_edit(request, tag_type, tag_number):
-    return monitor_client.proxy(request, f'/pcs/tags/{tag_type}/{tag_number}/edit/')
-
-
-def pcs_datasets_list(request):
-    return monitor_client.proxy(request, '/pcs/datasets/')
-
-
-def pcs_datasets_datatable_ajax(request):
-    return monitor_client.proxy(request, '/pcs/datasets/datatable/')
-
-
-def pcs_dataset_create(request):
-    return monitor_client.proxy(request, '/pcs/datasets/create/')
-
-
-def pcs_dataset_detail(request, pk):
-    return monitor_client.proxy(request, f'/pcs/datasets/{pk}/')
-
-
-def pcs_configs_list(request):
-    return monitor_client.proxy(request, '/pcs/configs/')
-
-
-def pcs_configs_datatable_ajax(request):
-    return monitor_client.proxy(request, '/pcs/configs/datatable/')
-
-
-def pcs_config_create(request):
-    return monitor_client.proxy(request, '/pcs/configs/create/')
-
-
-def pcs_config_detail(request, pk):
-    return monitor_client.proxy(request, f'/pcs/configs/{pk}/')
-
-
-def pcs_config_edit(request, pk):
-    return monitor_client.proxy(request, f'/pcs/configs/{pk}/edit/')
+def pcs_proxy(request, **kwargs):
+    """Proxy any PCS page to swf-monitor based on request path."""
+    path = request.path  # e.g. /pcs/tags/p/compose/
+    return monitor_client.proxy(request, path)
 
 
 def pcs_api_proxy(request, path):
-    """Proxy PCS REST API requests (GET only for now)."""
+    """Proxy PCS REST API requests."""
     return monitor_client.proxy(request, f'/pcs/api/{path}')
+
+
+# ── EIC PanDA Queues ──────────────────────────────────────────────────────
+# Proxied from swf-monitor (server-rendered pages).
+
+def epic_queues_list(request):
+    return monitor_client.proxy(request, '/panda/epic-queues/')
+
+
+def epic_queue_detail(request, queue_name):
+    return monitor_client.proxy(request, f'/panda/epic-queues/{queue_name}/')
 
 
 def panda_view_text(request):

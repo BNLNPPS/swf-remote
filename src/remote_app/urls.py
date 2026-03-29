@@ -28,32 +28,50 @@ urlpatterns = [
 
     path('panda/view-text/', views.panda_view_text, name='panda_view_text'),
 
-    # PCS (Physics Configuration System) — proxied from swf-monitor
-    path('pcs/', views.pcs_hub, name='pcs_hub'),
-    path('pcs/categories/', views.pcs_categories_list, name='pcs_categories_list'),
+    # EIC PanDA Queues — proxied from swf-monitor
+    path('panda/epic-queues/', views.epic_queues_list, name='epic_queues_list'),
+    path('panda/epic-queues/<str:queue_name>/', views.epic_queue_detail, name='epic_queue_detail'),
+
+    # PCS (Physics Configuration System) — all proxied from swf-monitor
+    path('pcs/', views.pcs_proxy, name='pcs_hub'),
+    path('pcs/categories/', views.pcs_proxy, name='pcs_categories_list'),
+    path('pcs/categories/create/', views.pcs_proxy, name='pcs_category_create'),
 
     # Tag compose (2-panel browse + create) — before generic tag routes
-    path('pcs/tags/<str:tag_type>/compose/', views.pcs_tag_compose, name='pcs_tag_compose'),
-    path('pcs/tags/<str:tag_type>/param-defs/', views.pcs_tag_param_defs, name='pcs_tag_param_defs'),
+    path('pcs/tags/<str:tag_type>/compose/', views.pcs_proxy, name='pcs_tag_compose'),
+    path('pcs/tags/<str:tag_type>/param-defs/', views.pcs_proxy, name='pcs_tag_param_defs'),
 
     # Tags
-    path('pcs/tags/<str:tag_type>/', views.pcs_tags_list, name='pcs_tags_list'),
-    path('pcs/tags/<str:tag_type>/datatable/', views.pcs_tags_datatable_ajax, name='pcs_tags_datatable_ajax'),
-    path('pcs/tags/<str:tag_type>/<int:tag_number>/', views.pcs_tag_detail, name='pcs_tag_detail'),
-    path('pcs/tags/<str:tag_type>/<int:tag_number>/edit/', views.pcs_tag_edit, name='pcs_tag_edit'),
+    path('pcs/tags/<str:tag_type>/', views.pcs_proxy, name='pcs_tags_list'),
+    path('pcs/tags/<str:tag_type>/datatable/', views.pcs_proxy, name='pcs_tags_datatable_ajax'),
+    path('pcs/tags/<str:tag_type>/<int:tag_number>/', views.pcs_proxy, name='pcs_tag_detail'),
+    path('pcs/tags/<str:tag_type>/<int:tag_number>/edit/', views.pcs_proxy, name='pcs_tag_edit'),
+    path('pcs/tags/<str:tag_type>/<int:tag_number>/delete/', views.pcs_proxy, name='pcs_tag_delete'),
+    path('pcs/tags/<str:tag_type>/<int:tag_number>/lock/', views.pcs_proxy, name='pcs_tag_lock'),
 
     # Datasets
-    path('pcs/datasets/', views.pcs_datasets_list, name='pcs_datasets_list'),
-    path('pcs/datasets/datatable/', views.pcs_datasets_datatable_ajax, name='pcs_datasets_datatable_ajax'),
-    path('pcs/datasets/create/', views.pcs_dataset_create, name='pcs_dataset_create'),
-    path('pcs/datasets/<int:pk>/', views.pcs_dataset_detail, name='pcs_dataset_detail'),
+    path('pcs/datasets/compose/', views.pcs_proxy, name='pcs_datasets_compose'),
+    path('pcs/datasets/', views.pcs_proxy, name='pcs_datasets_list'),
+    path('pcs/datasets/datatable/', views.pcs_proxy, name='pcs_datasets_datatable_ajax'),
+    path('pcs/datasets/create/', views.pcs_proxy, name='pcs_dataset_create'),
+    path('pcs/datasets/<int:pk>/', views.pcs_proxy, name='pcs_dataset_detail'),
+    path('pcs/datasets/<int:pk>/add-block/', views.pcs_proxy, name='pcs_dataset_add_block'),
 
     # Production Configs
-    path('pcs/configs/', views.pcs_configs_list, name='pcs_configs_list'),
-    path('pcs/configs/datatable/', views.pcs_configs_datatable_ajax, name='pcs_configs_datatable_ajax'),
-    path('pcs/configs/create/', views.pcs_config_create, name='pcs_config_create'),
-    path('pcs/configs/<int:pk>/', views.pcs_config_detail, name='pcs_config_detail'),
-    path('pcs/configs/<int:pk>/edit/', views.pcs_config_edit, name='pcs_config_edit'),
+    path('pcs/configs/compose/', views.pcs_proxy, name='pcs_prod_configs_compose'),
+    path('pcs/configs/', views.pcs_proxy, name='pcs_configs_list'),
+    path('pcs/configs/datatable/', views.pcs_proxy, name='pcs_configs_datatable_ajax'),
+    path('pcs/configs/create/', views.pcs_proxy, name='pcs_config_create'),
+    path('pcs/configs/<int:pk>/', views.pcs_proxy, name='pcs_config_detail'),
+    path('pcs/configs/<int:pk>/edit/', views.pcs_proxy, name='pcs_config_edit'),
+
+    # Production Tasks
+    path('pcs/tasks/', views.pcs_proxy, name='pcs_tasks_list'),
+    path('pcs/tasks/datatable/', views.pcs_proxy, name='pcs_tasks_datatable_ajax'),
+    path('pcs/tasks/compose/', views.pcs_proxy, name='pcs_task_compose'),
+    path('pcs/tasks/<int:pk>/', views.pcs_proxy, name='pcs_task_detail'),
+    path('pcs/tasks/<int:pk>/delete/', views.pcs_proxy, name='pcs_task_delete'),
+    path('pcs/tasks/<int:pk>/commands/', views.pcs_proxy, name='pcs_task_commands'),
 
     # PCS REST API (catch-all proxy for DRF endpoints)
     path('pcs/api/<path:path>', views.pcs_api_proxy, name='pcs_api_proxy'),
