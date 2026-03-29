@@ -23,15 +23,39 @@ def _base():
 
 
 def proxy(request, path):
-    """Proxy a GET request to swf-monitor, return an HttpResponse.
+    """Proxy a request to swf-monitor, return an HttpResponse.
 
-    Forwards all query parameters. Returns the upstream response as-is
-    (content-type, status code, body).
+    Forwards HTTP method, query parameters, request body, and authenticated
+    user identity (via X-Remote-User header). Returns the upstream response
+    as-is (content-type, status code, body) with URL rewriting.
     """
     url = f"{_base()}{path}"
     params = request.GET.dict()
+    headers = dict(UPSTREAM_HEADERS)
+
+    # Pass authenticated user identity for attribution on swf-monitor
+    if hasattr(request, 'user') and request.user.is_authenticated:
+        headers['X-Remote-User'] = request.user.username
+
+    method = request.method.upper()
     try:
-        resp = httpx.get(url, params=params, timeout=TIMEOUT, verify=False, headers=UPSTREAM_HEADERS)
+        if method == 'GET':
+            resp = httpx.get(url, params=params, timeout=TIMEOUT,
+                             verify=False, headers=headers)
+        elif method in ('POST', 'PATCH', 'PUT'):
+            ct = request.content_type or 'application/octet-stream'
+            headers['Content-Type'] = ct
+            resp = httpx.request(method, url, params=params, content=request.body,
+                                 timeout=TIMEOUT, verify=False, headers=headers)
+        elif method == 'DELETE':
+            resp = httpx.delete(url, params=params, timeout=TIMEOUT,
+                                verify=False, headers=headers)
+        else:
+            return HttpResponse(
+                f'{{"error": "Method {method} not supported"}}',
+                status=405, content_type='application/json',
+            )
+
         body = resp.content
         ct = resp.headers.get('content-type', 'application/json')
         # Rewrite upstream paths to match our proxy URL structure

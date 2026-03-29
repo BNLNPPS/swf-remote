@@ -5,9 +5,10 @@ Page views render the same templates as swf-monitor (shared via symlink).
 DataTables AJAX and filter-count views proxy to swf-monitor through the tunnel.
 """
 
-from django.http import HttpResponse
+from django.http import HttpResponse, JsonResponse
 from django.shortcuts import render
 from django.urls import reverse
+from django.views.decorators.csrf import csrf_exempt
 
 from . import monitor_client
 
@@ -212,8 +213,17 @@ def pcs_proxy(request, **kwargs):
     return monitor_client.proxy(request, path)
 
 
+@csrf_exempt
 def pcs_api_proxy(request, path):
-    """Proxy PCS REST API requests."""
+    """Proxy PCS REST API requests.
+
+    GET is public. Write methods (POST/PATCH/DELETE) require login —
+    the user's identity is forwarded to swf-monitor via X-Remote-User.
+    CSRF is exempted here because swf-monitor's API uses token auth,
+    not session+CSRF.
+    """
+    if request.method != 'GET' and not request.user.is_authenticated:
+        return JsonResponse({'error': 'Login required'}, status=401)
     return monitor_client.proxy(request, f'/pcs/api/{path}')
 
 
