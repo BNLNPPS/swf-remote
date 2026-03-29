@@ -58,13 +58,18 @@ def proxy(request, path):
 
         body = resp.content
         ct = resp.headers.get('content-type', 'application/json')
-        # Rewrite upstream paths to match our proxy URL structure
+        # Rewrite upstream relative paths (strip /swf-monitor/ prefix).
+        # Preserve absolute URLs to external hosts (e.g. pandaserver02).
         if b'/swf-monitor/' in body:
+            body = body.replace(b'.gov/swf-monitor/', b'.gov/\x00SWF_PRESERVE\x00/')
             body = body.replace(b'/swf-monitor/', b'/')
-        # Rewrite upstream hashed static CSS to our local path
-        if b'/static/css/style.' in body:
-            import re as _re
-            body = _re.sub(rb'/static/css/style\.[a-f0-9]+\.css', b'/static/css/style.css', body)
+            body = body.replace(b'.gov/\x00SWF_PRESERVE\x00/', b'.gov/swf-monitor/')
+        # Force production mode — devcloud has no testbed toggle
+        if b'navMode' in body:
+            body = body.replace(
+                b"localStorage.getItem('navMode')",
+                b"'production'",
+            )
         # Rewrite pandaserver-doma.cern.ch trf links through our text proxy
         if b'pandaserver-doma.cern.ch/trf/' in body:
             body = body.replace(b'href="https://pandaserver-doma.cern.ch/trf/', b'href="/panda/view-text/?url=https://pandaserver-doma.cern.ch/trf/')

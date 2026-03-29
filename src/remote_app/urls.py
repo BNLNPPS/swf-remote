@@ -5,9 +5,10 @@ app_name = 'monitor_app'
 
 urlpatterns = [
     path('', views.home, name='home'),
+    path('prod/', views.prod_home, name='prod_home'),
+    path('testbed/', views.testbed_home, name='testbed_home'),
 
-    # PanDA Production Monitor — mirrors swf-monitor's URL structure
-    path('panda/', views.panda_hub, name='panda_hub'),
+    # PanDA Production Monitor — proxied from swf-monitor
     path('panda/activity/', views.panda_activity, name='panda_activity'),
 
     path('panda/jobs/', views.panda_jobs_list, name='panda_jobs_list'),
@@ -75,4 +76,7 @@ urlpatterns = [
 
     # PCS REST API (catch-all proxy for DRF endpoints)
     path('pcs/api/<path:path>', views.pcs_api_proxy, name='pcs_api_proxy'),
+
+    # Static assets — proxy from swf-monitor so CSS/JS stays in sync
+    path('static/<path:path>', views.static_proxy, name='static_proxy'),
 ]
