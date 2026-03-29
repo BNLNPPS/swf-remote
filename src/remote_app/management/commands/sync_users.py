@@ -1,12 +1,12 @@
 """Sync user accounts from swf-monitor via the SSH tunnel.
 
 Calls swf-monitor's /api/users/ endpoint and creates matching local
-Django accounts. Existing users are left untouched. Run anytime to
-ensure devcloud accounts match BNL.
+Django accounts. When the endpoint includes password hashes, copies
+them so users have the same credentials on both systems.
 
 Usage:
     python manage.py sync_users
-    python manage.py sync_users --set-password changeme
+    python manage.py sync_users --set-password changeme   # fallback if no hash
 """
 
 import logging
@@ -25,7 +25,7 @@ class Command(BaseCommand):
     def add_arguments(self, parser):
         parser.add_argument(
             '--set-password',
-            help='Set this password on newly created accounts (default: unusable password)',
+            help='Fallback password for new accounts when no hash available from upstream',
         )
 
     def handle(self, *args, **options):
@@ -41,26 +41,38 @@ class Command(BaseCommand):
 
         User = get_user_model()
         created_count = 0
-        existing_count = 0
+        updated_count = 0
+        unchanged_count = 0
 
         for u in users:
             username = u.get('username', '').strip()
             if not username:
                 continue
+            pw_hash = u.get('password', '')
             user, created = User.objects.get_or_create(
                 username=username,
                 defaults={'is_active': u.get('is_active', True)},
             )
             if created:
-                if options['set_password']:
+                if pw_hash:
+                    # Copy hash directly — same credentials, no plaintext
+                    user.password = pw_hash
+                    user.save(update_fields=['password'])
+                elif options['set_password']:
                     user.set_password(options['set_password'])
-                    user.save()
+                    user.save(update_fields=['password'])
                 created_count += 1
                 self.stdout.write(self.style.SUCCESS(f'  Created: {username}'))
+            elif pw_hash and user.password != pw_hash:
+                # Update existing user's password hash to match upstream
+                user.password = pw_hash
+                user.save(update_fields=['password'])
+                updated_count += 1
+                self.stdout.write(f'  Updated password: {username}')
             else:
-                existing_count += 1
+                unchanged_count += 1
 
         self.stdout.write(
-            f'Done. {created_count} created, {existing_count} already existed '
-            f'(of {len(users)} from swf-monitor).'
+            f'Done. {created_count} created, {updated_count} updated, '
+            f'{unchanged_count} unchanged (of {len(users)} from swf-monitor).'
         )
