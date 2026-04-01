@@ -5,11 +5,27 @@ Most pages proxy full rendered HTML from swf-monitor through the SSH tunnel.
 The hub page is rendered locally (devcloud-specific content).
 """
 
+from django.contrib.auth import logout as auth_logout
 from django.http import HttpResponse, JsonResponse
-from django.shortcuts import render
+from django.shortcuts import redirect, render
 from django.views.decorators.csrf import csrf_exempt
 
 from . import monitor_client
+
+
+# ── Auth ─────────────────────────────────────────────────────────────────────
+
+@csrf_exempt
+def logout_view(request):
+    """Log out and redirect to home.
+
+    csrf_exempt because all pages are proxied from swf-monitor — the CSRF
+    token in the logout form is swf-monitor's, which we can never validate.
+    Logout is state-destroying so CSRF risk is negligible (worst case: attacker
+    logs the user out).
+    """
+    auth_logout(request)
+    return redirect('/prod/')
 
 
 # ── Home / Hub ───────────────────────────────────────────────────────────────

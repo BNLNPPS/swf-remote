@@ -31,6 +31,7 @@ MIDDLEWARE = [
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
+    'swf_remote_project.expire_old_cookies.ExpireOldCookiesMiddleware',
 ]
 
 ROOT_URLCONF = 'swf_remote_project.urls'
@@ -80,10 +81,12 @@ STATIC_ROOT = BASE_DIR.parent / 'staticfiles'
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
-# Cookie path scoping — prevent conflicts with other apps on same domain
+# Cookie scoping — unique names prevent conflicts with other apps on same domain
 _subpath = FORCE_SCRIPT_NAME or ""
 CSRF_COOKIE_PATH = _subpath or "/"
 SESSION_COOKIE_PATH = _subpath or "/"
+CSRF_COOKIE_NAME = 'csrftoken_prod'
+SESSION_COOKIE_NAME = 'sessionid_prod'
 
 # Behind Apache reverse proxy
 USE_X_FORWARDED_HOST = True
