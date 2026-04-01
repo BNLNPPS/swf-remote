@@ -58,11 +58,13 @@ def proxy(request, path):
 
         body = resp.content
         ct = resp.headers.get('content-type', 'application/json')
-        # Rewrite upstream relative paths (strip /swf-monitor/ prefix).
+        # Rewrite upstream paths to match our mount point.
+        # /swf-monitor/X → {SCRIPT_NAME}/X (e.g. /prod/X)
         # Preserve absolute URLs to external hosts (e.g. pandaserver02).
+        prefix = (settings.FORCE_SCRIPT_NAME or '').encode()
         if b'/swf-monitor/' in body:
             body = body.replace(b'.gov/swf-monitor/', b'.gov/\x00SWF_PRESERVE\x00/')
-            body = body.replace(b'/swf-monitor/', b'/')
+            body = body.replace(b'/swf-monitor/', prefix + b'/')
             body = body.replace(b'.gov/\x00SWF_PRESERVE\x00/', b'.gov/swf-monitor/')
         # Force production mode — devcloud has no testbed toggle
         if b'navMode' in body:
@@ -72,8 +74,8 @@ def proxy(request, path):
             )
         # Rewrite pandaserver-doma.cern.ch trf links through our text proxy
         if b'pandaserver-doma.cern.ch/trf/' in body:
-            body = body.replace(b'href="https://pandaserver-doma.cern.ch/trf/', b'href="/panda/view-text/?url=https://pandaserver-doma.cern.ch/trf/')
-            body = body.replace(b'href=\\"https://pandaserver-doma.cern.ch/trf/', b'href=\\"/panda/view-text/?url=https://pandaserver-doma.cern.ch/trf/')
+            body = body.replace(b'href="https://pandaserver-doma.cern.ch/trf/', b'href="' + prefix + b'/panda/view-text/?url=https://pandaserver-doma.cern.ch/trf/')
+            body = body.replace(b'href=\\"https://pandaserver-doma.cern.ch/trf/', b'href=\\"' + prefix + b'/panda/view-text/?url=https://pandaserver-doma.cern.ch/trf/')
         return HttpResponse(body, status=resp.status_code, content_type=ct)
     except httpx.ConnectError as e:
         logger.error(f"Cannot reach swf-monitor at {url}: {e}")

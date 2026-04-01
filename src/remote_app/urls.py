@@ -4,8 +4,8 @@ from . import views
 app_name = 'monitor_app'
 
 urlpatterns = [
-    path('', views.home, name='home'),
-    path('prod/', views.prod_home, name='prod_home'),
+    path('', views.prod_home, name='home'),
+    path('prod/', views.prod_home, name='prod_home'),  # alias for backward compat
     path('testbed/', views.testbed_home, name='testbed_home'),
 
     # PanDA Production Monitor — proxied from swf-monitor

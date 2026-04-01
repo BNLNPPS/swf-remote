@@ -17,7 +17,8 @@ from . import monitor_client
 def home(request):
     """Root — always production on devcloud."""
     from django.shortcuts import redirect
-    return redirect('/prod/')
+    from django.urls import reverse
+    return redirect(reverse('monitor_app:prod_home'))
 
 
 def prod_home(request):
@@ -88,7 +89,7 @@ def panda_diagnostics_datatable_ajax(request):
 
 def pcs_proxy(request, **kwargs):
     """Proxy any PCS page to swf-monitor based on request path."""
-    path = request.path  # e.g. /pcs/tags/p/compose/
+    path = request.path_info  # e.g. /pcs/tags/p/compose/ (excludes SCRIPT_NAME)
     return monitor_client.proxy(request, path)
 
 

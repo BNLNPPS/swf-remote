@@ -72,15 +72,27 @@ TIME_ZONE = 'America/New_York'
 USE_I18N = True
 USE_TZ = True
 
+# Subpath deployment (e.g. /prod on epic-devcloud.org)
+FORCE_SCRIPT_NAME = config('SWF_REMOTE_FORCE_SCRIPT_NAME', default='') or None
+
 STATIC_URL = config('SWF_REMOTE_STATIC_URL', default='/static/')
 STATIC_ROOT = BASE_DIR.parent / 'staticfiles'
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
+# Cookie path scoping — prevent conflicts with other apps on same domain
+_subpath = FORCE_SCRIPT_NAME or ""
+CSRF_COOKIE_PATH = _subpath or "/"
+SESSION_COOKIE_PATH = _subpath or "/"
+
+# Behind Apache reverse proxy
+USE_X_FORWARDED_HOST = True
+SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+
 # Authentication
 LOGIN_URL = 'login'
-LOGIN_REDIRECT_URL = '/'
-LOGOUT_REDIRECT_URL = '/'
+LOGIN_REDIRECT_URL = 'monitor_app:prod_home'
+LOGOUT_REDIRECT_URL = 'monitor_app:home'
 
 # swf-monitor REST base URL (via SSH tunnel to pandaserver02)
 SWF_MONITOR_URL = config('SWF_REMOTE_MONITOR_URL', default='https://localhost:18443/swf-monitor')
