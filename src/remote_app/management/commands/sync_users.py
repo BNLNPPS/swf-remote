@@ -1,8 +1,10 @@
 """Sync user accounts from swf-monitor via the SSH tunnel.
 
 Calls swf-monitor's /api/users/ endpoint and creates matching local
-Django accounts. When the endpoint includes password hashes, copies
-them so users have the same credentials on both systems.
+Django accounts. Sync is one-way (upstream → devcloud) and password
+sync only happens at initial provisioning: existing local users are
+never password-overwritten by sync, since devcloud account management
+is autonomous after creation.
 
 Usage:
     python manage.py sync_users
@@ -41,7 +43,6 @@ class Command(BaseCommand):
 
         User = get_user_model()
         created_count = 0
-        updated_count = 0
         unchanged_count = 0
 
         for u in users:
@@ -63,16 +64,12 @@ class Command(BaseCommand):
                     user.save(update_fields=['password'])
                 created_count += 1
                 self.stdout.write(self.style.SUCCESS(f'  Created: {username}'))
-            elif pw_hash and user.password != pw_hash:
-                # Update existing user's password hash to match upstream
-                user.password = pw_hash
-                user.save(update_fields=['password'])
-                updated_count += 1
-                self.stdout.write(f'  Updated password: {username}')
             else:
+                # Existing local user — never touch the password. Devcloud
+                # account management is autonomous after initial provisioning.
                 unchanged_count += 1
 
         self.stdout.write(
-            f'Done. {created_count} created, {updated_count} updated, '
+            f'Done. {created_count} created, '
             f'{unchanged_count} unchanged (of {len(users)} from swf-monitor).'
         )

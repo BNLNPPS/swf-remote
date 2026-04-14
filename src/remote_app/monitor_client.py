@@ -8,14 +8,21 @@ Two modes:
 """
 
 import logging
+import re
 import httpx
 from django.conf import settings
 from django.http import HttpResponse
+from django.template.loader import render_to_string
 
 logger = logging.getLogger(__name__)
 
 TIMEOUT = 30
 UPSTREAM_HEADERS = {'Host': 'pandaserver02.sdcc.bnl.gov'}
+
+# Replace upstream's <div class="nav-auth">...</div> block with a locally-
+# rendered fragment so account/login/logout actions resolve to swf-remote
+# (devcloud) URLs, not upstream BNL URLs. Devcloud has its own user table.
+NAV_AUTH_RE = re.compile(rb'<div class="nav-auth">.*?</div>', re.DOTALL)
 
 
 def _base():
@@ -72,6 +79,14 @@ def proxy(request, path):
                 b"localStorage.getItem('navMode')",
                 b"'production'",
             )
+        # Replace upstream's nav-auth section with a locally-rendered fragment.
+        # Account management is autonomous on devcloud — login/logout/account
+        # all resolve to local URLs against the local user table.
+        if b'<div class="nav-auth">' in body:
+            local_auth = render_to_string(
+                'monitor_app/_nav_auth.html', request=request,
+            ).encode('utf-8')
+            body = NAV_AUTH_RE.sub(lambda m: local_auth, body, count=1)
         # Rewrite pandaserver-doma.cern.ch trf links through our text proxy
         if b'pandaserver-doma.cern.ch/trf/' in body:
             body = body.replace(b'href="https://pandaserver-doma.cern.ch/trf/', b'href="' + prefix + b'/panda/view-text/?url=https://pandaserver-doma.cern.ch/trf/')

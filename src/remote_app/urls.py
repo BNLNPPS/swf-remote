@@ -7,6 +7,8 @@ urlpatterns = [
     path('', views.prod_home, name='home'),
     path('prod/', views.prod_home, name='prod_home'),  # alias for backward compat
     path('testbed/', views.testbed_home, name='testbed_home'),
+    path('account/', views.account, name='account'),
+    path('about/', views.about, name='about'),
 
     # PanDA Production Monitor — proxied from swf-monitor
     path('panda/activity/', views.panda_activity, name='panda_activity'),

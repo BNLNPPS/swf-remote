@@ -1,0 +1,29 @@
+{% extends 'base.html' %}
+
+{% block title %}Account — ePIC Production Monitor{% endblock %}
+
+{% block content %}
+<div class="container mt-4" style="max-width: 720px;">
+    <h2 class="mb-4">Account</h2>
+
+    <div class="card mb-4">
+        <div class="card-body">
+            <p class="mb-1"><strong>Username:</strong> {{ user.username }}</p>
+            <p class="mb-1"><strong>Email:</strong> {{ user.email|default:'—' }}</p>
+            <p class="mb-0"><strong>Roles:</strong>
+                {% if user.is_superuser %}Superuser{% elif user.is_staff %}Staff{% else %}User{% endif %}
+            </p>
+        </div>
+    </div>
+
+    <p>
+        <a class="btn btn-primary" href="{% url 'password_change' %}">Change password</a>
+    </p>
+
+    <p class="text-muted mt-4" style="font-size: 0.9em;">
+        Devcloud accounts are managed locally on epic-devcloud.org. Initial
+        accounts may be provisioned by sync from pandaserver02; once provisioned,
+        password changes here do not propagate upstream.
+    </p>
+</div>
+{% endblock %}

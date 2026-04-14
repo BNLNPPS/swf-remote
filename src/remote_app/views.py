@@ -6,6 +6,7 @@ The hub page is rendered locally (devcloud-specific content).
 """
 
 from django.contrib.auth import logout as auth_logout
+from django.contrib.auth.decorators import login_required
 from django.http import HttpResponse, JsonResponse
 from django.shortcuts import redirect, render
 from django.views.decorators.csrf import csrf_exempt
@@ -26,6 +27,16 @@ def logout_view(request):
     """
     auth_logout(request)
     return redirect('/prod/')
+
+
+@login_required
+def account(request):
+    return render(request, 'monitor_app/account.html')
+
+
+def about(request):
+    """About page — proxied from swf-monitor for content consistency."""
+    return monitor_client.proxy(request, '/about/')
 
 
 # ── Home / Hub ───────────────────────────────────────────────────────────────
