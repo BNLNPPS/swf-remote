@@ -31,7 +31,10 @@ class Command(BaseCommand):
         )
 
     def handle(self, *args, **options):
-        data = monitor_client._get('/api/users/')
+        # as_user sets X-Remote-User for TunnelAuthentication on upstream.
+        # 'swf-remote-proxy' is the existing service-user convention
+        # (see swf-monitor middleware.py).
+        data = monitor_client._get('/api/users/', as_user='swf-remote-proxy')
         if 'error' in data:
             self.stderr.write(self.style.ERROR(f"Failed to fetch users: {data['error']}"))
             return
@@ -52,7 +55,12 @@ class Command(BaseCommand):
             pw_hash = u.get('password', '')
             user, created = User.objects.get_or_create(
                 username=username,
-                defaults={'is_active': u.get('is_active', True)},
+                defaults={
+                    'is_active': u.get('is_active', True),
+                    'email': u.get('email', '') or '',
+                    'first_name': u.get('first_name', '') or '',
+                    'last_name': u.get('last_name', '') or '',
+                },
             )
             if created:
                 if pw_hash:
@@ -65,8 +73,8 @@ class Command(BaseCommand):
                 created_count += 1
                 self.stdout.write(self.style.SUCCESS(f'  Created: {username}'))
             else:
-                # Existing local user — never touch the password. Devcloud
-                # account management is autonomous after initial provisioning.
+                # Existing local user — never touch password, email, or names.
+                # Devcloud account management is autonomous after provisioning.
                 unchanged_count += 1
 
         self.stdout.write(

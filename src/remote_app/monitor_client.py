@@ -106,11 +106,20 @@ def proxy(request, path):
         )
 
 
-def _get(path, params=None):
-    """GET request to swf-monitor, return parsed JSON dict."""
+def _get(path, params=None, as_user=None):
+    """GET request to swf-monitor, return parsed JSON dict.
+
+    `as_user` sets X-Remote-User for TunnelAuthentication on endpoints that
+    require auth (e.g. /api/users/). Pass a service username like
+    'swf-remote-sync' when running from management commands without a
+    Django request context.
+    """
     url = f"{_base()}{path}"
+    headers = dict(UPSTREAM_HEADERS)
+    if as_user:
+        headers['X-Remote-User'] = as_user
     try:
-        resp = httpx.get(url, params=params, timeout=TIMEOUT, verify=False, headers=UPSTREAM_HEADERS)
+        resp = httpx.get(url, params=params, timeout=TIMEOUT, verify=False, headers=headers)
         resp.raise_for_status()
         return resp.json()
     except httpx.ConnectError as e:
