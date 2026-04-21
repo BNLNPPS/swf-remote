@@ -1,220 +1,201 @@
-"""Query helpers for the alarm dashboard — Django ORM over the same
-Postgres tables the standalone engine writes. No schema here; see
-`models.py`.
-
-Returns plain dicts (not model instances) so the templates keep the same
-attribute style they had when they were backed by sqlite row dicts, and
-so the health-banner helper can operate on a pickled snapshot without
-hitting the DB again.
+"""Query helpers for the alarm dashboard — ORM over the Entry / EntryVersion
+tables. No model logic beyond what the views need.
 """
 from __future__ import annotations
 
+import time
 from datetime import datetime, timezone, timedelta
 
 from django.db.models import Count, Max
 
-from .models import AlarmCheckRun, AlarmFiring, AlarmFiringEvent, AlarmRun
+from .models import Entry, EntryContext, EntryVersion
 
 
-def _firing_to_dict(f: AlarmFiring) -> dict:
-    return {
-        "id": f.id,
-        "check_name": f.check_name,
-        "dedupe_key": f.dedupe_key,
-        "first_fired_at": f.first_fired_at,
-        "last_fired_at": f.last_fired_at,
-        "last_seen_at": f.last_seen_at,
-        "cooldown_until": f.cooldown_until,
-        "state": f.state,
-        "cleared_at": f.cleared_at,
-        "severity": f.severity,
-        "subject": f.subject,
-        "body": f.body,
-        "recipients": f.recipients,
-        "recipients_list": [r for r in f.recipients.split(",") if r],
-        "data": f.data,
-    }
+CONTEXT_NAME = 'swf-alarms'
 
 
-def list_firings(state: str | None = None, limit: int = 200) -> list[dict]:
-    qs = AlarmFiring.objects.all()
-    if state:
-        qs = qs.filter(state=state)
-    return [_firing_to_dict(f) for f in qs.order_by("-last_fired_at")[:limit]]
+def _active_alarm_configs_qs():
+    return (Entry.objects
+            .filter(context_id=CONTEXT_NAME, kind='alarm',
+                    archived=False, deleted_at__isnull=True)
+            .order_by('timestamp_created'))
 
 
-def get_firing(firing_id: int) -> dict | None:
-    try:
-        f = AlarmFiring.objects.get(id=firing_id)
-    except AlarmFiring.DoesNotExist:
-        return None
-    return _firing_to_dict(f)
-
-
-def events_for(firing_id: int, limit: int = 200) -> list[dict]:
-    qs = AlarmFiringEvent.objects.filter(firing_id=firing_id).order_by("-ts")[:limit]
-    return [{"ts": e.ts, "action": e.action, "notes": e.notes} for e in qs]
-
-
-def recent_runs(limit: int = 50) -> list[dict]:
-    qs = AlarmRun.objects.order_by("-started_at")[:limit]
-    return [{
-        "id": r.id,
-        "started_at": r.started_at,
-        "finished_at": r.finished_at,
-        "checks_run": r.checks_run,
-        "alarms_seen": r.alarms_seen,
-        "notifications_sent": r.notifications_sent,
-        "errors": r.errors,
-    } for r in qs]
-
-
-def summary() -> dict:
-    """Counts + severity breakdown + engine health."""
-    try:
-        active = AlarmFiring.objects.filter(state="active").count()
-        total = AlarmFiring.objects.count()
-        sev_rows = (AlarmFiring.objects
-                    .filter(state="active")
-                    .values("severity")
-                    .annotate(n=Count("id")))
-        severity_counts = {r["severity"]: r["n"] for r in sev_rows}
-        last_run = AlarmRun.objects.order_by("-started_at").first()
-    except Exception:  # noqa: BLE001 — DB unreachable, degrade to empty
-        return {"active": 0, "total": 0, "last_run": None,
-                "severity_counts": {}, "available": False}
-
-    return {
-        "active": active,
-        "total": total,
-        "severity_counts": severity_counts,
-        "last_run": {
-            "started_at": last_run.started_at,
-            "finished_at": last_run.finished_at,
-            "checks_run": last_run.checks_run,
-            "alarms_seen": last_run.alarms_seen,
-            "notifications_sent": last_run.notifications_sent,
-            "errors": last_run.errors,
-        } if last_run else None,
-        "available": True,
-    }
-
-
-def check_summary() -> list[dict]:
-    """Per-check status — one row per configured check.
-
-    Derived from the most recent AlarmCheckRun per check_name, plus a count
-    of currently-active firings attributed to that check.
-    """
-    # Find the latest started_at per check_name
-    latest_ts = (AlarmCheckRun.objects
-                 .values("check_name")
-                 .annotate(mx=Max("started_at")))
-    latest_map = {r["check_name"]: r["mx"] for r in latest_ts}
-    if not latest_map:
-        return []
-
-    # Pull the actual rows for those (check_name, mx) pairs.
-    latest_rows = list(
-        AlarmCheckRun.objects
-        .filter(check_name__in=latest_map.keys())
-        .order_by("check_name", "-started_at")
-    )
-    seen: set[str] = set()
-    latest_per_check: list[AlarmCheckRun] = []
-    for r in latest_rows:
-        if r.check_name in seen:
-            continue
-        if r.started_at == latest_map[r.check_name]:
-            latest_per_check.append(r)
-            seen.add(r.check_name)
-
-    # Active firing counts per check in one query.
-    active_counts = {
-        r["check_name"]: r["n"]
-        for r in (AlarmFiring.objects
-                  .filter(state="active")
-                  .values("check_name")
-                  .annotate(n=Count("id")))
-    }
-    # Last-fired timestamp per check.
-    last_fired = {
-        r["check_name"]: r["mx"]
-        for r in (AlarmFiring.objects
-                  .values("check_name")
-                  .annotate(mx=Max("last_fired_at")))
-    }
-
+def alarm_configs() -> list[dict]:
     out = []
-    for r in sorted(latest_per_check, key=lambda x: x.check_name):
+    for e in _active_alarm_configs_qs():
+        data = e.data or {}
         out.append({
-            "check_name": r.check_name,
-            "kind": r.kind,
-            "enabled": r.enabled,
-            "started_at": r.started_at,
-            "finished_at": r.finished_at,
-            "alarms_seen": r.alarms_seen,
-            "errors": r.errors,
-            "error_message": r.error_message,
-            "params_snapshot": r.params_snapshot,
-            "active_firings": active_counts.get(r.check_name, 0),
-            "last_fired_at": last_fired.get(r.check_name),
+            'id': e.id,
+            'entry_id': data.get('entry_id', ''),
+            'name': data.get('entry_id', '').replace('alarm_', '', 1) or e.id[:8],
+            'content': e.content,
+            'kind': data.get('kind', ''),
+            'enabled': bool(data.get('enabled', True)),
+            'severity': data.get('severity', 'warning'),
+            'recipients': list(data.get('recipients') or []),
+            'params': dict(data.get('params') or {}),
+            'created': e.timestamp_created,
+            'modified': e.timestamp_modified,
+            'data': data,
         })
     return out
 
 
-def overall_health(summary_dict: dict, checks: list[dict]) -> dict:
-    """Compute a single traffic-light for the top banner.
+def get_alarm_config_by_entry_id(entry_id: str) -> Entry | None:
+    try:
+        return (Entry.objects
+                .filter(context_id=CONTEXT_NAME, kind='alarm',
+                        data__entry_id=entry_id,
+                        deleted_at__isnull=True)
+                .first())
+    except Entry.DoesNotExist:
+        return None
 
-    Returns {status, reasons[]} where status ∈ {'ok','warn','bad','unknown'}.
+
+def events_in_window(alarm_entry_id: str, hours: int, limit: int = 500) -> list[dict]:
+    """Event entries whose fire_time is within the last N hours.
+
+    Returns dicts with useful denormalised fields for the template.
     """
+    event_entry_id = _event_entry_id_for(alarm_entry_id)
+    cutoff = time.time() - hours * 3600
+    qs = (Entry.objects
+          .filter(context_id=CONTEXT_NAME, kind='event',
+                  data__entry_id=event_entry_id,
+                  archived=False, deleted_at__isnull=True,
+                  timestamp_created__gte=cutoff)
+          .order_by('-timestamp_created')[:limit])
+    return [_event_to_dict(e) for e in qs]
+
+
+def count_events_in_window(alarm_entry_id: str, hours: int) -> int:
+    event_entry_id = _event_entry_id_for(alarm_entry_id)
+    cutoff = time.time() - hours * 3600
+    return (Entry.objects
+            .filter(context_id=CONTEXT_NAME, kind='event',
+                    data__entry_id=event_entry_id,
+                    archived=False, deleted_at__isnull=True,
+                    timestamp_created__gte=cutoff)
+            .count())
+
+
+def active_event_count(alarm_entry_id: str) -> int:
+    event_entry_id = _event_entry_id_for(alarm_entry_id)
+    return (Entry.objects
+            .filter(context_id=CONTEXT_NAME, kind='event',
+                    data__entry_id=event_entry_id,
+                    archived=False, deleted_at__isnull=True,
+                    data__clear_time__isnull=True)
+            .count())
+
+
+def last_fired(alarm_entry_id: str):
+    event_entry_id = _event_entry_id_for(alarm_entry_id)
+    row = (Entry.objects
+           .filter(context_id=CONTEXT_NAME, kind='event',
+                   data__entry_id=event_entry_id,
+                   archived=False, deleted_at__isnull=True)
+           .order_by('-timestamp_created').values('timestamp_created').first())
+    return row['timestamp_created'] if row else None
+
+
+def get_event(event_uuid: str) -> dict | None:
+    try:
+        e = Entry.objects.get(id=event_uuid, context_id=CONTEXT_NAME,
+                              kind='event', deleted_at__isnull=True)
+    except Entry.DoesNotExist:
+        return None
+    return _event_to_dict(e)
+
+
+def versions_for(entry_uuid: str, limit: int = 50) -> list[dict]:
+    qs = (EntryVersion.objects
+          .filter(entry_id=entry_uuid)
+          .order_by('-version_num')[:limit])
+    return [{
+        'id': v.id,
+        'version_num': v.version_num,
+        'content': v.content,
+        'data': v.data,
+        'changed_by': v.changed_by,
+        'timestamp': v.timestamp,
+        'preview': (v.content or '').splitlines()[0][:120] if v.content else '',
+        'line_count': (v.content or '').count('\n') + (1 if (v.content or '') else 0),
+    } for v in qs]
+
+
+def recent_runs(limit: int = 20) -> list[dict]:
+    qs = (Entry.objects
+          .filter(context_id=CONTEXT_NAME, kind='engine_run',
+                  archived=False, deleted_at__isnull=True)
+          .order_by('-timestamp_created')[:limit])
+    return [{
+        'id': e.id,
+        'data': e.data or {},
+    } for e in qs]
+
+
+def engine_health() -> dict:
+    """Traffic light for the dashboard header."""
+    try:
+        last = (Entry.objects
+                .filter(context_id=CONTEXT_NAME, kind='engine_run',
+                        deleted_at__isnull=True)
+                .order_by('-timestamp_created').first())
+    except Exception:  # noqa: BLE001
+        return {'status': 'unknown', 'reasons': ['DB not reachable.']}
+
+    if last is None:
+        return {'status': 'unknown', 'reasons': ['Engine has never run.']}
+
+    data = last.data or {}
+    finished = data.get('finished_at')
     reasons: list[str] = []
-    status = "ok"
-
-    if not summary_dict.get("available"):
-        return {"status": "unknown",
-                "reasons": ["Alarm DB not reachable."]}
-
-    last_run = summary_dict.get("last_run")
-    if not last_run:
-        return {"status": "unknown",
-                "reasons": ["Engine has never run."]}
-
-    finished = last_run.get("finished_at")
+    status = 'ok'
     if not finished:
-        reasons.append("Last engine run did not finish (in progress or crashed).")
-        status = "warn"
+        reasons.append('Last engine run did not finish.')
+        status = 'warn'
     else:
-        if finished.tzinfo is None:
-            finished = finished.replace(tzinfo=timezone.utc)
-        age = datetime.now(timezone.utc) - finished
-        if age > timedelta(minutes=15):
+        age = time.time() - float(finished)
+        if age > 15 * 60:
             reasons.append(
-                f"Engine stale: last run finished {int(age.total_seconds()//60)} min ago "
-                f"(expected every 5 min)."
-            )
-            status = "bad"
+                f'Engine stale: last run finished {int(age // 60)} min ago.')
+            status = 'bad'
+    if data.get('errors'):
+        reasons.append(f"Last run had {data['errors']} error(s).")
+        status = 'bad'
+    if not reasons:
+        reasons.append('All checks healthy.')
+    return {'status': status, 'reasons': reasons, 'last_run': data,
+            'last_run_id': last.id}
 
-    if last_run.get("errors"):
-        reasons.append(f"Last run had {last_run['errors']} error(s).")
-        status = "bad"
 
-    sev = summary_dict.get("severity_counts") or {}
-    if sev.get("critical"):
-        reasons.append(f"{sev['critical']} critical alarm(s) active.")
-        status = "bad"
-    if sev.get("warning"):
-        reasons.append(f"{sev['warning']} warning alarm(s) active.")
-        if status == "ok":
-            status = "warn"
-    if sev.get("info"):
-        reasons.append(f"{sev['info']} info alarm(s) active.")
+# ── internal helpers ───────────────────────────────────────────────────────
 
-    for c in checks:
-        if c.get("errors"):
-            reasons.append(f"Check {c['check_name']}: last run errored.")
-            status = "bad"
+def _event_entry_id_for(alarm_entry_id: str) -> str:
+    if alarm_entry_id.startswith('alarm_'):
+        return 'event_' + alarm_entry_id[len('alarm_'):]
+    return 'event_' + alarm_entry_id
 
-    if status == "ok" and not reasons:
-        reasons.append("All checks healthy, no active alarms.")
-    return {"status": status, "reasons": reasons}
+
+def _event_to_dict(e: Entry) -> dict:
+    data = e.data or {}
+    fire_time = data.get('fire_time')
+    clear_time = data.get('clear_time')
+    return {
+        'id': e.id,
+        'entry_id': data.get('entry_id'),
+        'subject': data.get('subject', ''),
+        'dedupe_key': data.get('dedupe_key'),
+        'severity': data.get('severity'),
+        'fire_time': fire_time,
+        'clear_time': clear_time,
+        'last_seen': data.get('last_seen'),
+        'state': 'active' if clear_time is None else 'cleared',
+        'recipients': data.get('recipients') or [],
+        'content': e.content,
+        'data': data,
+        'timestamp_created': e.timestamp_created,
+        'timestamp_modified': e.timestamp_modified,
+    }

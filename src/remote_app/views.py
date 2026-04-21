@@ -165,38 +165,13 @@ def static_proxy(request, path):
     return monitor_client.proxy(request, f'/static/{path}')
 
 
-def alarms_dashboard(request):
-    """Read-only dashboard: overall health, per-check status, active alarms, runs."""
-    from . import alarms_data
-    state_filter = request.GET.get("state") or "active"
-    if state_filter not in ("active", "cleared", "all"):
-        state_filter = "active"
-    summary = alarms_data.summary()
-    checks = alarms_data.check_summary()
-    health = alarms_data.overall_health(summary, checks)
-    return render(request, "monitor_app/alarms.html", {
-        "summary": summary,
-        "health": health,
-        "checks": checks,
-        "firings": alarms_data.list_firings(
-            state=None if state_filter == "all" else state_filter,
-            limit=500,
-        ),
-        "state_filter": state_filter,
-        "recent_runs": alarms_data.recent_runs(limit=20),
-    })
-
-
-def alarms_detail(request, firing_id):
-    from . import alarms_data
-    firing = alarms_data.get_firing(firing_id)
-    if firing is None:
-        return HttpResponse("Alarm firing not found", status=404,
-                            content_type="text/plain")
-    return render(request, "monitor_app/alarm_detail.html", {
-        "firing": firing,
-        "events": alarms_data.events_for(firing_id, limit=500),
-    })
+from .alarm_views import (  # noqa: E402
+    alarms_dashboard,
+    alarm_event_detail,
+    alarm_config_edit,
+    alarm_config_save,
+    alarm_config_version,
+)
 
 
 def panda_view_text(request):

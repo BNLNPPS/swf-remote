@@ -1,25 +1,38 @@
-"""Postgres state store for swf-alarms.
+"""Postgres access to swf-remote's `entry` / `entry_context` tables.
 
-The swf-remote Django app already owns a Postgres database; the alarm
-engine writes to it directly via psycopg, and the Django dashboard reads
-the same rows through its ORM. Schema is owned by swf-remote's migrations
-(see remote_app/models.py). Table names are pinned there via `db_table` so
-the SQL below can reference them without guessing app-prefixed names:
+The alarm engine runs standalone (no Django), but the state it writes lives
+in swf-remote's own Postgres, not a side store. Schema is owned by Django
+migrations in remote_app/models.py. Everything here is raw SQL against:
 
-    alarm_run            AlarmRun
-    alarm_check_run      AlarmCheckRun
-    alarm_firing         AlarmFiring
-    alarm_firing_event   AlarmFiringEvent
+    entry             — generic document rows (kind='alarm' configs,
+                        kind='event' firings, kind='engine_run' ticks, …)
+    entry_context     — named project/topic groupings
 
-The engine remains standalone — no Django import, no settings bootstrap.
-It just needs a DSN reachable from wherever it runs. Credentials can live
-either in the engine's own config.toml or (by default) be read from
-swf-remote's existing .env so there's one source of truth.
+Conventions used by the alarm system:
+    context.name       = 'swf-alarms'
+    kind='alarm'       — one per configured alarm, data.entry_id like
+                         'alarm_panda_failure_rate_sakib'.
+                         data = {kind, enabled, severity, recipients,
+                                 params, ...}
+                         content = human-readable description (used as
+                         the top of alarm emails; editable in the UI).
+    kind='event'       — one per firing instance. Shares
+                         data.entry_id = 'event_<alarm_name>' with all
+                         other firings of that alarm (non-unique).
+                         data = {fire_time, clear_time (null=active),
+                                 dedupe_key, subject, severity, recipients,
+                                 alarm_config_id, ...context...}
+                         content = body text used in the email.
+    kind='engine_run'  — one per engine tick. data = summary counters.
+
+Archive: status='archive' is filtered out of live dashboard queries.
 """
 from __future__ import annotations
 
 import json
 import logging
+import time
+import uuid
 from contextlib import contextmanager
 from datetime import datetime, timezone
 
@@ -29,21 +42,27 @@ from psycopg.rows import dict_row
 
 log = logging.getLogger(__name__)
 
+CONTEXT_NAME = 'swf-alarms'
+
 
 def now_utc() -> datetime:
     return datetime.now(timezone.utc)
 
 
+def now_ts() -> float:
+    return time.time()
+
+
+def new_uuid() -> str:
+    return str(uuid.uuid4())
+
+
 def connect(dsn: str):
-    """Return a new autocommit connection with dict row factory."""
     return psycopg.connect(dsn, autocommit=True, row_factory=dict_row)
 
 
 def init_schema(conn) -> None:
-    """No-op. Migrations own the schema (swf-remote/src/remote_app/migrations/).
-
-    Retained so the runner's existing init_schema() call still works.
-    """
+    """No-op — migrations own the schema. Kept for API symmetry."""
     return
 
 
@@ -53,124 +72,150 @@ def transaction(conn):
         yield
 
 
-# ── firings ────────────────────────────────────────────────────────────────
+# ── alarm configs ──────────────────────────────────────────────────────────
 
-def get_firing(conn, check_name: str, dedupe_key: str):
-    with conn.cursor() as cur:
-        cur.execute(
-            "SELECT * FROM alarm_firing WHERE check_name=%s AND dedupe_key=%s",
-            (check_name, dedupe_key),
-        )
-        return cur.fetchone()
+def list_alarm_configs(conn, *, enabled_only: bool = True) -> list[dict]:
+    """Load all non-archived alarm config entries from the swf-alarms context.
 
-
-def upsert_firing(
-    conn,
-    *,
-    check_name: str,
-    dedupe_key: str,
-    severity: str,
-    subject: str,
-    body: str,
-    recipients: list[str],
-    data: dict,
-    cooldown_until: datetime | None,
-) -> tuple[int, bool, bool]:
-    """Insert-or-update a firing keyed on (check_name, dedupe_key).
-
-    Returns (firing_id, is_new, was_cleared):
-      is_new       — first time we've seen this dedupe_key
-      was_cleared  — previous state was 'cleared'; re-opening it
+    Returns rows ordered by data.entry_id ascending for deterministic runs.
     """
-    existing = get_firing(conn, check_name, dedupe_key)
-    now = now_utc()
-    recipients_csv = ",".join(recipients)
-    data_json = json.dumps(data, default=str, sort_keys=True)
-
+    q = """
+        SELECT e.*
+        FROM entry e
+        JOIN entry_context c ON c.name = e.context_id
+        WHERE c.name = %s
+          AND e.kind = 'alarm'
+          AND e.archived = FALSE
+          AND e.deleted_at IS NULL
+        ORDER BY e.data->>'entry_id'
+    """
     with conn.cursor() as cur:
-        if existing is None:
-            cur.execute(
-                """INSERT INTO alarm_firing
-                   (check_name, dedupe_key, first_fired_at, last_fired_at,
-                    last_seen_at, cooldown_until, state, severity, subject,
-                    body, recipients, data)
-                   VALUES (%s, %s, %s, %s, %s, %s, 'active', %s, %s, %s, %s, %s::jsonb)
-                   RETURNING id""",
-                (check_name, dedupe_key, now, now, now, cooldown_until,
-                 severity, subject, body, recipients_csv, data_json),
-            )
-            return cur.fetchone()["id"], True, False
-
-        was_cleared = existing["state"] == "cleared"
-        cur.execute(
-            """UPDATE alarm_firing SET
-               last_fired_at=%s, last_seen_at=%s, cooldown_until=%s,
-               state='active', cleared_at=NULL,
-               severity=%s, subject=%s, body=%s, recipients=%s, data=%s::jsonb
-               WHERE id=%s""",
-            (now, now, cooldown_until, severity, subject, body,
-             recipients_csv, data_json, existing["id"]),
-        )
-    return existing["id"], False, was_cleared
+        cur.execute(q, (CONTEXT_NAME,))
+        rows = cur.fetchall()
+    if enabled_only:
+        rows = [r for r in rows if (r.get('data') or {}).get('enabled', True)]
+    return rows
 
 
-def clear_firing(conn, firing_id: int, note: str = "") -> None:
+# ── events (firings) ───────────────────────────────────────────────────────
+
+def active_events_for_alarm(conn, alarm_entry_id: str) -> list[dict]:
+    """All currently-active (fire_time set, clear_time null) events for this
+    alarm. Archived events are excluded."""
+    q = """
+        SELECT * FROM entry
+        WHERE kind = 'event'
+          AND context_id = %s
+          AND data->>'entry_id' = %s
+          AND (data->>'clear_time') IS NULL
+          AND archived = FALSE
+          AND deleted_at IS NULL
+    """
+    event_entry_id = f"event_{alarm_entry_id[len('alarm_'):]}" if alarm_entry_id.startswith('alarm_') else f"event_{alarm_entry_id}"
     with conn.cursor() as cur:
-        cur.execute(
-            "UPDATE alarm_firing SET state='cleared', cleared_at=%s WHERE id=%s",
-            (now_utc(), firing_id),
-        )
-    log_event(conn, firing_id, "cleared", note)
+        cur.execute(q, (CONTEXT_NAME, event_entry_id))
+        return cur.fetchall()
 
 
-# ── events ─────────────────────────────────────────────────────────────────
+def create_event(conn, *, alarm_entry_id: str, dedupe_key: str,
+                 severity: str, subject: str, body: str,
+                 recipients: list[str], extra_data: dict,
+                 alarm_config_uuid: str) -> str:
+    """Insert a new kind='event' entry with fire_time=now, clear_time=null.
 
-def log_event(conn, firing_id: int, action: str, notes: str = "") -> None:
-    with conn.cursor() as cur:
-        cur.execute(
-            "INSERT INTO alarm_firing_event (firing_id, ts, action, notes) "
-            "VALUES (%s, %s, %s, %s)",
-            (firing_id, now_utc(), action, notes),
-        )
-
-
-# ── runs ───────────────────────────────────────────────────────────────────
-
-def start_run(conn) -> int:
-    with conn.cursor() as cur:
-        cur.execute(
-            "INSERT INTO alarm_run (started_at) VALUES (%s) RETURNING id",
-            (now_utc(),),
-        )
-        return cur.fetchone()["id"]
-
-
-def finish_run(conn, run_id: int, *, checks_run: int, alarms_seen: int,
-               notifications_sent: int, errors: int,
-               error_details: str = "") -> None:
+    Returns the new Entry UUID.
+    """
+    event_entry_id = f"event_{alarm_entry_id[len('alarm_'):]}" if alarm_entry_id.startswith('alarm_') else f"event_{alarm_entry_id}"
+    now = now_ts()
+    data = {
+        'entry_id': event_entry_id,
+        'fire_time': now,
+        'clear_time': None,
+        'last_seen': now,
+        'dedupe_key': dedupe_key,
+        'subject': subject,
+        'severity': severity,
+        'recipients': list(recipients),
+        'alarm_config_id': alarm_config_uuid,
+        **extra_data,
+    }
+    new_id = new_uuid()
     with conn.cursor() as cur:
         cur.execute(
-            """UPDATE alarm_run SET finished_at=%s, checks_run=%s,
-               alarms_seen=%s, notifications_sent=%s, errors=%s,
-               error_details=%s WHERE id=%s""",
-            (now_utc(), checks_run, alarms_seen, notifications_sent,
-             errors, error_details or '', run_id),
+            """INSERT INTO entry
+               (id, content, kind, context_id, data, status,
+                timestamp_created, timestamp_modified)
+               VALUES (%s, %s, 'event', %s, %s::jsonb, 'active', %s, %s)""",
+            (new_id, body, CONTEXT_NAME, json.dumps(data, default=str),
+             now, now),
         )
+    return new_id
 
 
-def record_check_run(conn, *, run_id: int, check_name: str, kind: str,
-                     enabled: bool, started_at: datetime, alarms_seen: int,
-                     errors: int, error_message: str = "",
-                     params_snapshot_json: str | None = None) -> int:
+def touch_event_last_seen(conn, event_uuid: str) -> None:
+    """Bump data.last_seen (and timestamp_modified) on an active event."""
+    now = now_ts()
     with conn.cursor() as cur:
         cur.execute(
-            """INSERT INTO alarm_check_run
-               (run_id, check_name, kind, enabled, started_at, finished_at,
-                alarms_seen, errors, error_message, params_snapshot)
-               VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb)
-               RETURNING id""",
-            (run_id, check_name, kind, enabled, started_at, now_utc(),
-             alarms_seen, errors, error_message or '',
-             params_snapshot_json),
+            """UPDATE entry
+               SET data = jsonb_set(data, '{last_seen}', to_jsonb(%s::float8), true),
+                   timestamp_modified = %s
+               WHERE id = %s""",
+            (now, now, event_uuid),
         )
-        return cur.fetchone()["id"]
+
+
+def clear_event(conn, event_uuid: str) -> None:
+    """Set data.clear_time = now on an event (condition has resolved)."""
+    now = now_ts()
+    with conn.cursor() as cur:
+        cur.execute(
+            """UPDATE entry
+               SET data = jsonb_set(data, '{clear_time}', to_jsonb(%s::float8), true),
+                   timestamp_modified = %s
+               WHERE id = %s""",
+            (now, now, event_uuid),
+        )
+
+
+# ── engine runs ────────────────────────────────────────────────────────────
+
+def start_engine_run(conn) -> str:
+    """Create a kind='engine_run' entry with started_at; return its UUID."""
+    now = now_ts()
+    uid = new_uuid()
+    data = {'entry_id': f'run_{int(now)}', 'started_at': now}
+    with conn.cursor() as cur:
+        cur.execute(
+            """INSERT INTO entry
+               (id, content, kind, context_id, data, status,
+                timestamp_created, timestamp_modified)
+               VALUES (%s, '', 'engine_run', %s, %s::jsonb, 'active', %s, %s)""",
+            (uid, CONTEXT_NAME, json.dumps(data), now, now),
+        )
+    return uid
+
+
+def finish_engine_run(conn, run_uuid: str, *, checks_run: int,
+                      alarms_seen: int, notifications_sent: int,
+                      errors: int, error_details: str = '',
+                      per_check: dict | None = None) -> None:
+    now = now_ts()
+    update = {
+        'finished_at': now,
+        'checks_run': checks_run,
+        'alarms_seen': alarms_seen,
+        'notifications_sent': notifications_sent,
+        'errors': errors,
+        'error_details': error_details,
+        'per_check': per_check or {},
+    }
+    with conn.cursor() as cur:
+        cur.execute(
+            """UPDATE entry
+               SET data = data || %s::jsonb,
+                   status = 'done',
+                   timestamp_modified = %s
+               WHERE id = %s""",
+            (json.dumps(update, default=str), now, run_uuid),
+        )

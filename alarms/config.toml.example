@@ -1,49 +1,26 @@
-# swf-alarms config — copy to config.toml and edit.
+# swf-alarms engine config — copy to config.toml.
+#
+# Alarm *configurations* (thresholds, recipients, severities, enabled flags)
+# live in the DB as kind='alarm' entries in the swf-alarms context. Edit
+# them in the dashboard UI, not here. This file only has settings the
+# engine itself needs to start up.
 
 [engine]
-# Use loopback through swf-remote's Apache. swf-remote owns the SSH tunnel
+# Loopback through swf-remote's Apache. swf-remote owns the SSH tunnel
 # to pandaserver02; this engine never talks to BNL directly.
 swf_remote_base_url = "https://epic-devcloud.org/prod"
 request_timeout = 20
 log_path = "/var/log/swf-alarms/run.log"
 
-# Postgres for alarm state lives in swf-remote's own DB. By default the
-# engine reads SWF_REMOTE_DB_* credentials from swf-remote's .env so there
-# is ONE source of truth; override here if running the engine elsewhere.
+# Postgres — alarm state goes in swf-remote's own DB. By default the
+# engine reads SWF_REMOTE_DB_* from swf-remote's .env so there is one
+# source of truth.
 [db]
 # env_path = "/var/www/swf-remote/src/.env"
-# Or set an explicit DSN instead:
+# Or explicit DSN override:
 # dsn = "postgresql://swf_remote:PASSWORD@localhost:5432/swf_remote"
 
 [email]
 provider = "ses"
 region = "us-east-1"
 from = "wenaus@gmail.com"
-
-# Per-owner alarm: Sakib's tasks. Lower-noise configuration.
-[[checks]]
-name = "panda_failure_rate_sakib"
-kind = "task_failure_rate"
-enabled = true
-severity = "warning"
-recipients = ["srahman1@bnl.gov", "wenaus@gmail.com"]
-cooldown_hours = 24
-threshold = 0.03          # 3% computed_failurerate
-days_window = 1
-workinggroup = "EIC"
-username = "Sakib Rahman"
-min_terminal_jobs = 5
-# statuses = ["running", "failed", "broken"]   # default if unset
-
-# Catch-all: any EIC task over threshold, Torre only (tuning channel).
-[[checks]]
-name = "panda_failure_rate_eic_all"
-kind = "task_failure_rate"
-enabled = true
-severity = "info"
-recipients = ["wenaus@gmail.com"]
-cooldown_hours = 24
-threshold = 0.05          # 5% — looser, Torre-only feed
-days_window = 1
-workinggroup = "EIC"
-min_terminal_jobs = 5

@@ -24,6 +24,19 @@ UPSTREAM_HEADERS = {'Host': 'pandaserver02.sdcc.bnl.gov'}
 # (devcloud) URLs, not upstream BNL URLs. Devcloud has its own user table.
 NAV_AUTH_RE = re.compile(rb'<div class="nav-auth">.*?</div>', re.DOTALL)
 
+# Inject an "Alarms" link at the end of the production-mode nav section
+# (swf-monitor's base.html wraps the production links in a
+# <span class="nav-mode nav-production">…</span>). swf-monitor itself
+# doesn't know about devcloud alarms, so we surface them here on the
+# proxied pages the same way we replace nav-auth.
+NAV_ALARMS_LINK = (
+    b'<a href="/prod/alarms/" style="margin-left:1em;">Alarms</a>'
+)
+NAV_PROD_END_RE = re.compile(
+    rb'(<span class="nav-mode nav-production">[\s\S]*?)(</span>)',
+    re.DOTALL,
+)
+
 
 def _base():
     return settings.SWF_MONITOR_URL.rstrip('/')
@@ -93,6 +106,12 @@ def proxy(request, path, service_user=None):
                 'monitor_app/_nav_auth.html', request=request,
             ).encode('utf-8')
             body = NAV_AUTH_RE.sub(lambda m: local_auth, body, count=1)
+        # Inject Alarms link at end of the production-mode nav section.
+        if b'nav-mode nav-production' in body and b'/prod/alarms/' not in body:
+            body = NAV_PROD_END_RE.sub(
+                lambda m: m.group(1) + NAV_ALARMS_LINK + m.group(2),
+                body, count=1,
+            )
         # Rewrite pandaserver-doma.cern.ch trf links through our text proxy
         if b'pandaserver-doma.cern.ch/trf/' in body:
             body = body.replace(b'href="https://pandaserver-doma.cern.ch/trf/', b'href="' + prefix + b'/panda/view-text/?url=https://pandaserver-doma.cern.ch/trf/')

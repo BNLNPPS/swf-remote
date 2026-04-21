@@ -1,16 +1,25 @@
-"""Main entry point — run one pass of all enabled checks, notify, persist.
+"""swf-alarms engine entry point.
 
-Design: deterministic, idempotent, crash-safe.
-- Each run opens a transaction per alarm so a crash mid-run doesn't leave
-  orphaned state.
-- Cooldown governs notification, NOT detection. Detection runs every tick
-  and `last_seen_at` is updated each time — so the dashboard reflects
-  current truth. Email is the rate-limited channel.
-- Notifications must never throw. A failed send is logged and accounted
-  for in the run record.
-- An alarm that wasn't seen this run is NOT auto-cleared. Cooldown keeps
-  us quiet; explicit clearing is a future feature (likely user-driven
-  via the dashboard, or time-based "not seen in N runs → clear").
+Per-tick behavior (active/clear semantics):
+
+  1. Load kind='alarm' entries (not archived, enabled) from the DB.
+  2. For each alarm config:
+     a. Fetch existing active events for this alarm (one per entity still
+        firing) — indexed by data.dedupe_key.
+     b. Run the check; collect the dedupe_keys it yields this tick.
+     c. For each detection:
+          - If already active for same dedupe_key: touch last_seen, no email.
+          - Else: create new event entry (fire_time=now, clear_time=null),
+            compose email body (alarm.content + detection body_context),
+            send email, log outcome.
+     d. For each previously-active event NOT in the current detection set:
+        set data.clear_time = now (auto-clear).
+  3. Close out kind='engine_run' entry with aggregate counters + per-check
+     detail.
+
+No cooldown flag: dedup is *state-based* — one active event per (alarm,
+entity). Re-firings only happen after a cleared→fire transition. This is
+tjai-style state, which is what Torre asked for.
 """
 from __future__ import annotations
 
@@ -18,35 +27,17 @@ import argparse
 import json
 import logging
 import sys
+import time
 import traceback
-from datetime import datetime, timedelta, timezone
 
 from . import config as config_mod
 from . import db
-from .checks import REGISTRY
+from .checks import REGISTRY, Detection
 from .fetch import Client, FetchError
-from .notify import send_email_ses
+from .notify import Alarm, send_email_ses
 
 
 log = logging.getLogger("swf_alarms")
-
-
-def _cooldown_until(hours: float) -> datetime:
-    return datetime.now(timezone.utc) + timedelta(hours=hours)
-
-
-def _is_in_cooldown(cooldown_until) -> bool:
-    if cooldown_until is None:
-        return False
-    now = datetime.now(timezone.utc)
-    if isinstance(cooldown_until, str):
-        try:
-            cooldown_until = datetime.fromisoformat(cooldown_until)
-        except ValueError:
-            return False
-    if cooldown_until.tzinfo is None:
-        cooldown_until = cooldown_until.replace(tzinfo=timezone.utc)
-    return now < cooldown_until
 
 
 def _configure_logging(log_path: str | None, verbose: bool) -> None:
@@ -57,14 +48,13 @@ def _configure_logging(log_path: str | None, verbose: bool) -> None:
     logging.basicConfig(
         level=level,
         format="%(asctime)s %(levelname)s %(name)s %(message)s",
-        handlers=handlers,
-        force=True,
+        handlers=handlers, force=True,
     )
 
 
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="swf-alarms-run")
-    ap.add_argument("--config", required=True, help="path to TOML config")
+    ap.add_argument("--config", required=True, help="path to engine TOML")
     ap.add_argument("--dry-run", action="store_true",
                     help="detect and persist, but suppress notifications")
     ap.add_argument("-v", "--verbose", action="store_true")
@@ -75,146 +65,159 @@ def main(argv: list[str] | None = None) -> int:
 
     log.info("run starting  config=%s  dry_run=%s", args.config, args.dry_run)
     conn = db.connect(cfg.db_dsn)
+    run_uuid = db.start_engine_run(conn)
 
-    run_id = db.start_run(conn)
-    client = Client(cfg.engine.swf_remote_base_url, timeout=cfg.engine.request_timeout)
+    client = Client(cfg.engine.swf_remote_base_url,
+                    timeout=cfg.engine.request_timeout)
+
+    alarm_configs = db.list_alarm_configs(conn, enabled_only=True)
+    log.info("loaded %d enabled alarm config(s)", len(alarm_configs))
 
     checks_run = 0
     alarms_seen = 0
     notifications_sent = 0
     errors = 0
     error_traces: list[str] = []
+    per_check: dict[str, dict] = {}
 
-    for check in cfg.checks:
-        check_started = db.now_utc()
-        params_snapshot = json.dumps({
-            "severity": check.severity,
-            "recipients": check.recipients,
-            "cooldown_hours": check.cooldown_hours,
-            "params": check.params,
-        }, sort_keys=True, default=str)
-
-        if not check.enabled:
-            log.info("skip disabled check: %s", check.name)
-            db.record_check_run(
-                conn, run_id=run_id, check_name=check.name, kind=check.kind,
-                enabled=False, started_at=check_started, alarms_seen=0,
-                errors=0, params_snapshot_json=params_snapshot,
-            )
-            continue
-        if check.kind not in REGISTRY:
-            msg = f"unknown check kind {check.kind!r}"
-            log.error("%s (name=%s) — skipping", msg, check.name)
+    for alarm in alarm_configs:
+        data = alarm.get("data") or {}
+        alarm_entry_id = data.get("entry_id", "")
+        kind = data.get("kind")
+        if not alarm_entry_id or not kind:
+            log.error("alarm %s missing data.entry_id or data.kind — skipping",
+                      alarm["id"])
             errors += 1
-            error_traces.append(f"[{check.name}] {msg}")
-            db.record_check_run(
-                conn, run_id=run_id, check_name=check.name, kind=check.kind,
-                enabled=True, started_at=check_started, alarms_seen=0,
-                errors=1, error_message=msg,
-                params_snapshot_json=params_snapshot,
-            )
+            continue
+        if kind not in REGISTRY:
+            msg = f"unknown alarm kind {kind!r}"
+            log.error("%s (entry_id=%s) — skipping", msg, alarm_entry_id)
+            errors += 1
+            error_traces.append(f"[{alarm_entry_id}] {msg}")
+            per_check[alarm_entry_id] = {
+                "kind": kind, "enabled": True,
+                "alarms_seen": 0, "errors": 1, "error_message": msg,
+            }
             continue
 
-        log.info("running check: name=%s kind=%s", check.name, check.kind)
         checks_run += 1
-        fn = REGISTRY[check.kind]
-
-        params = dict(check.params)
-        params["_recipients"] = check.recipients
-        params["_severity"] = check.severity
-        params["_check_name"] = check.name
+        fn = REGISTRY[kind]
+        params = dict(data.get("params") or {})
+        severity = data.get("severity", "warning")
+        recipients = list(data.get("recipients") or [])
 
         check_seen = 0
-        check_err_message = ""
         check_err = 0
+        check_err_msg = ""
+        detected_keys: set[str] = set()
+
+        # Existing active events for this alarm — map dedupe_key → row
         try:
-            for alarm in fn(client, params):
+            active_rows = db.active_events_for_alarm(conn, alarm_entry_id)
+        except Exception as e:  # noqa: BLE001
+            log.error("active_events_for_alarm(%s) failed: %s",
+                      alarm_entry_id, e)
+            active_rows = []
+        active_by_key = {
+            (r.get("data") or {}).get("dedupe_key"): r for r in active_rows
+        }
+
+        try:
+            for det in fn(client, params):  # type: Detection
                 check_seen += 1
-                if _persist_and_maybe_notify(conn, check, alarm,
-                                             cfg.email, dry_run=args.dry_run):
+                alarms_seen += 1
+                detected_keys.add(det.dedupe_key)
+                existing = active_by_key.get(det.dedupe_key)
+                if existing is not None:
+                    # Already firing; bump last_seen, no new email.
+                    db.touch_event_last_seen(conn, existing["id"])
+                    continue
+
+                # New firing — create event entry, send email.
+                full_body = _compose_body(alarm.get("content") or "",
+                                          det.body_context)
+                event_uuid = db.create_event(
+                    conn,
+                    alarm_entry_id=alarm_entry_id,
+                    dedupe_key=det.dedupe_key,
+                    severity=severity,
+                    subject=det.subject,
+                    body=full_body,
+                    recipients=recipients,
+                    extra_data=det.extra_data,
+                    alarm_config_uuid=alarm["id"],
+                )
+                if args.dry_run or not recipients:
+                    continue
+                sent = send_email_ses(
+                    Alarm(
+                        check_name=alarm_entry_id,
+                        dedupe_key=det.dedupe_key,
+                        severity=severity,
+                        subject=det.subject,
+                        body=full_body,
+                        recipients=recipients,
+                        data=det.extra_data,
+                    ),
+                    region=cfg.email.region,
+                    from_addr=cfg.email.from_addr,
+                )
+                if sent:
                     notifications_sent += 1
         except FetchError as e:
-            log.error("check %s fetch failed: %s", check.name, e)
+            log.error("alarm %s fetch failed: %s", alarm_entry_id, e)
             errors += 1
             check_err = 1
-            check_err_message = f"fetch: {e}"
-            error_traces.append(f"[{check.name}] fetch: {e}")
+            check_err_msg = f"fetch: {e}"
+            error_traces.append(f"[{alarm_entry_id}] fetch: {e}")
         except Exception:  # noqa: BLE001
             tb = traceback.format_exc()
-            log.error("check %s raised:\n%s", check.name, tb)
+            log.error("alarm %s raised:\n%s", alarm_entry_id, tb)
             errors += 1
             check_err = 1
-            check_err_message = tb
-            error_traces.append(f"[{check.name}]\n{tb}")
-        alarms_seen += check_seen
+            check_err_msg = tb
+            error_traces.append(f"[{alarm_entry_id}]\n{tb}")
 
-        db.record_check_run(
-            conn, run_id=run_id, check_name=check.name, kind=check.kind,
-            enabled=True, started_at=check_started, alarms_seen=check_seen,
-            errors=check_err, error_message=check_err_message,
-            params_snapshot_json=params_snapshot,
-        )
+        # Auto-clear events whose dedupe_key wasn't seen this tick.
+        # Only do so if the check ran without error — otherwise we'd clear
+        # everything on a transient fetch failure.
+        if check_err == 0:
+            for key, ev in active_by_key.items():
+                if key not in detected_keys:
+                    try:
+                        db.clear_event(conn, ev["id"])
+                    except Exception as e:  # noqa: BLE001
+                        log.error("clear_event failed for %s: %s", ev["id"], e)
 
-    db.finish_run(
-        conn, run_id,
+        per_check[alarm_entry_id] = {
+            "kind": kind,
+            "enabled": True,
+            "alarms_seen": check_seen,
+            "errors": check_err,
+            "error_message": check_err_msg,
+            "params": params,
+            "severity": severity,
+            "recipients": recipients,
+        }
+
+    db.finish_engine_run(
+        conn, run_uuid,
         checks_run=checks_run,
         alarms_seen=alarms_seen,
         notifications_sent=notifications_sent,
         errors=errors,
         error_details="\n\n".join(error_traces),
+        per_check=per_check,
     )
-    log.info(
-        "run done  checks=%d  alarms_seen=%d  sent=%d  errors=%d",
-        checks_run, alarms_seen, notifications_sent, errors,
-    )
+    log.info("run done  checks=%d  alarms_seen=%d  sent=%d  errors=%d",
+             checks_run, alarms_seen, notifications_sent, errors)
     return 0 if errors == 0 else 1
 
 
-def _persist_and_maybe_notify(conn, check, alarm: Alarm, email_cfg,
-                              *, dry_run: bool) -> bool:
-    """Persist the alarm; notify if not in cooldown. Returns True if sent."""
-    existing = db.get_firing(conn, alarm.check_name, alarm.dedupe_key)
-    in_cooldown = existing is not None and _is_in_cooldown(existing["cooldown_until"])
-
-    will_notify = not in_cooldown and not dry_run
-    cooldown_until = _cooldown_until(check.cooldown_hours) if will_notify else (
-        existing["cooldown_until"] if existing else None
-    )
-
-    firing_id, is_new, was_cleared = db.upsert_firing(
-        conn,
-        check_name=alarm.check_name,
-        dedupe_key=alarm.dedupe_key,
-        severity=alarm.severity,
-        subject=alarm.subject,
-        body=alarm.body,
-        recipients=alarm.recipients,
-        data=alarm.data,
-        cooldown_until=cooldown_until,
-    )
-    if is_new:
-        db.log_event(conn, firing_id, "fired", f"severity={alarm.severity}")
-    elif was_cleared:
-        db.log_event(conn, firing_id, "re-fired", "state: cleared -> active")
-    else:
-        db.log_event(conn, firing_id, "re-confirmed", "")
-
-    if dry_run:
-        db.log_event(conn, firing_id, "notify-skipped-dry-run", "")
-        return False
-    if in_cooldown:
-        db.log_event(conn, firing_id, "notify-skipped-cooldown",
-                     f"until={existing['cooldown_until']}")
-        return False
-
-    ok = send_email_ses(alarm, region=email_cfg.region, from_addr=email_cfg.from_addr)
-    if ok:
-        db.log_event(conn, firing_id, "notified",
-                     f"channel=email recipients={','.join(alarm.recipients)}")
-        return True
-    db.log_event(conn, firing_id, "notify-failed",
-                 f"channel=email recipients={','.join(alarm.recipients)}")
-    return False
+def _compose_body(alarm_description: str, detail: str) -> str:
+    if alarm_description and alarm_description.strip():
+        return f"{alarm_description.rstrip()}\n\n---\n\n{detail}"
+    return detail
 
 
 if __name__ == "__main__":

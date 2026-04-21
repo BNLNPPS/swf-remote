@@ -82,9 +82,16 @@ urlpatterns = [
     # PanDA REST API (read-only JSON; catch-all proxy for DRF endpoints)
     path('api/panda/<path:path>', views.panda_api_proxy, name='panda_api_proxy'),
 
-    # Alarm dashboard (reads swf-alarms sqlite state file; no ORM, no engine)
+    # Alarm dashboard (entries-backed; see alarm_views.py)
     path('alarms/', views.alarms_dashboard, name='alarms_dashboard'),
-    path('alarms/<int:firing_id>/', views.alarms_detail, name='alarms_detail'),
+    path('alarms/events/<str:event_uuid>/', views.alarm_event_detail,
+         name='alarm_event_detail'),
+    path('alarms/<str:entry_id>/edit/', views.alarm_config_edit,
+         name='alarm_config_edit'),
+    path('alarms/<str:entry_id>/save/', views.alarm_config_save,
+         name='alarm_config_save'),
+    path('alarms/<str:entry_id>/versions/<int:version_num>/',
+         views.alarm_config_version, name='alarm_config_version'),
 
     # Static assets — proxy from swf-monitor so CSS/JS stays in sync
     path('static/<path:path>', views.static_proxy, name='static_proxy'),
