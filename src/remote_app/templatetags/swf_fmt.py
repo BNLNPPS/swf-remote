@@ -20,15 +20,24 @@ _EASTERN = ZoneInfo('America/New_York')
 
 @register.filter(name='fmt_dt')
 def fmt_dt(value):
-    """Format a datetime / ISO string as ``YYYYMMDD HH:MM:SS`` in Eastern.
+    """Format a datetime / ISO string / Unix float as ``YYYYMMDD HH:MM:SS``
+    in Eastern.
+
+    Accepts Python datetimes, date objects, ISO strings, and Unix-epoch
+    floats / ints (which is what Entry.timestamp_created uses).
 
     Returns:
         - '' for falsy input
-        - the original string if parsing fails (don't hide bad data)
+        - the original string if ISO parsing fails
         - formatted string otherwise
     """
-    if not value:
+    if not value and value != 0:
         return ''
+    if isinstance(value, (int, float)):
+        try:
+            value = datetime.fromtimestamp(float(value), tz=_EASTERN)
+        except (OSError, OverflowError, ValueError):
+            return str(value)
     if isinstance(value, str):
         try:
             value = datetime.fromisoformat(value)

@@ -144,8 +144,9 @@ def create_event(conn, *, alarm_entry_id: str, dedupe_key: str,
         cur.execute(
             """INSERT INTO entry
                (id, title, content, kind, context_id, data, status,
-                timestamp_created, timestamp_modified)
-               VALUES (%s, %s, %s, 'event', %s, %s::jsonb, 'active', %s, %s)""",
+                archived, timestamp_created, timestamp_modified)
+               VALUES (%s, %s, %s, 'event', %s, %s::jsonb, 'active',
+                       FALSE, %s, %s)""",
             (new_id, subject[:255], body, CONTEXT_NAME,
              json.dumps(data, default=str), now, now),
         )
@@ -190,8 +191,9 @@ def start_engine_run(conn) -> str:
         cur.execute(
             """INSERT INTO entry
                (id, title, content, kind, context_id, data, status,
-                timestamp_created, timestamp_modified)
-               VALUES (%s, %s, '', 'engine_run', %s, %s::jsonb, 'active', %s, %s)""",
+                archived, timestamp_created, timestamp_modified)
+               VALUES (%s, %s, '', 'engine_run', %s, %s::jsonb, 'active',
+                       FALSE, %s, %s)""",
             (uid, title, CONTEXT_NAME, json.dumps(data), now, now),
         )
     return uid
