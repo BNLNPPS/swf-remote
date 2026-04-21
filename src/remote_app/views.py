@@ -134,6 +134,21 @@ def pcs_api_proxy(request, path):
     return monitor_client.proxy(request, f'/pcs/api/{path}')
 
 
+def panda_api_proxy(request, path):
+    """Proxy PanDA REST API requests to swf-monitor /api/panda/<path>.
+
+    Read-only: GET only. Upstream requires IsAuthenticated, so we inject
+    a service identity when no Django user is logged in — the alarm engine
+    and other service consumers hit this anonymously from localhost and
+    appear to upstream as 'swf-remote-proxy'.
+    """
+    if request.method != 'GET':
+        return JsonResponse({'error': 'GET only'}, status=405)
+    return monitor_client.proxy(
+        request, f'/api/panda/{path}', service_user='swf-remote-proxy'
+    )
+
+
 # ── EIC PanDA Queues ──────────────────────────────────────────────────────
 # Proxied from swf-monitor (server-rendered pages).
 
@@ -148,6 +163,40 @@ def epic_queue_detail(request, queue_name):
 def static_proxy(request, path):
     """Proxy static assets from swf-monitor — CSS, JS always in sync."""
     return monitor_client.proxy(request, f'/static/{path}')
+
+
+def alarms_dashboard(request):
+    """Read-only dashboard: overall health, per-check status, active alarms, runs."""
+    from . import alarms_reader
+    state_filter = request.GET.get("state") or "active"
+    if state_filter not in ("active", "cleared", "all"):
+        state_filter = "active"
+    summary = alarms_reader.summary()
+    checks = alarms_reader.check_summary()
+    health = alarms_reader.overall_health(summary, checks)
+    return render(request, "monitor_app/alarms.html", {
+        "summary": summary,
+        "health": health,
+        "checks": checks,
+        "firings": alarms_reader.list_firings(
+            state=None if state_filter == "all" else state_filter,
+            limit=500,
+        ),
+        "state_filter": state_filter,
+        "recent_runs": alarms_reader.recent_runs(limit=20),
+    })
+
+
+def alarms_detail(request, firing_id):
+    from . import alarms_reader
+    firing = alarms_reader.get_firing(firing_id)
+    if firing is None:
+        return HttpResponse("Alarm firing not found", status=404,
+                            content_type="text/plain")
+    return render(request, "monitor_app/alarm_detail.html", {
+        "firing": firing,
+        "events": alarms_reader.events_for(firing_id, limit=500),
+    })
 
 
 def panda_view_text(request):

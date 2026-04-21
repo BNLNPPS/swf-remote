@@ -1,0 +1,42 @@
+# swf-alarms config — copy to config.toml and edit.
+
+[engine]
+state_db = "/var/lib/swf-alarms/state.db"
+# Use loopback through swf-remote's Apache. swf-remote owns the SSH tunnel
+# to pandaserver02; this engine never talks to BNL directly.
+swf_remote_base_url = "https://epic-devcloud.org/prod"
+request_timeout = 20
+log_path = "/var/log/swf-alarms/run.log"
+
+[email]
+provider = "ses"
+region = "us-east-1"
+from = "wenaus@gmail.com"
+
+# Per-owner alarm: Sakib's tasks. Lower-noise configuration.
+[[checks]]
+name = "panda_failure_rate_sakib"
+kind = "task_failure_rate"
+enabled = true
+severity = "warning"
+recipients = ["srahman1@bnl.gov", "wenaus@gmail.com"]
+cooldown_hours = 24
+threshold = 0.03          # 3% computed_failurerate
+days_window = 1
+workinggroup = "EIC"
+username = "Sakib Rahman"
+min_terminal_jobs = 5
+# statuses = ["running", "failed", "broken"]   # default if unset
+
+# Catch-all: any EIC task over threshold, Torre only (tuning channel).
+[[checks]]
+name = "panda_failure_rate_eic_all"
+kind = "task_failure_rate"
+enabled = true
+severity = "info"
+recipients = ["wenaus@gmail.com"]
+cooldown_hours = 24
+threshold = 0.05          # 5% — looser, Torre-only feed
+days_window = 1
+workinggroup = "EIC"
+min_terminal_jobs = 5

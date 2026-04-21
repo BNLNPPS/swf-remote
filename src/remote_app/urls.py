@@ -79,6 +79,13 @@ urlpatterns = [
     # PCS REST API (catch-all proxy for DRF endpoints)
     path('pcs/api/<path:path>', views.pcs_api_proxy, name='pcs_api_proxy'),
 
+    # PanDA REST API (read-only JSON; catch-all proxy for DRF endpoints)
+    path('api/panda/<path:path>', views.panda_api_proxy, name='panda_api_proxy'),
+
+    # Alarm dashboard (reads swf-alarms sqlite state file; no ORM, no engine)
+    path('alarms/', views.alarms_dashboard, name='alarms_dashboard'),
+    path('alarms/<int:firing_id>/', views.alarms_detail, name='alarms_detail'),
+
     # Static assets — proxy from swf-monitor so CSS/JS stays in sync
     path('static/<path:path>', views.static_proxy, name='static_proxy'),
 ]

@@ -1,0 +1,216 @@
+{% extends 'base.html' %}
+
+{% block title %}Alarms — ePIC Production Monitor{% endblock %}
+
+{% block content %}
+<div class="container-fluid mt-3" style="max-width: 1400px;">
+    <h2 class="mb-3">Alarms</h2>
+
+    {% if not summary.available %}
+        <div class="alert alert-warning">
+            <strong>Alarm state DB not available.</strong>
+            The swf-alarms engine may not have run yet, or its sqlite state
+            file is unreachable at the configured path. Once the engine runs
+            its first pass, firings will appear here.
+        </div>
+    {% else %}
+
+        {# ───── Overall health banner ───── #}
+        {% if health.status == 'ok' %}
+            <div class="alert alert-success py-2">
+                <strong>Overall: OK.</strong>
+                {% for r in health.reasons %}{{ r }} {% endfor %}
+            </div>
+        {% elif health.status == 'warn' %}
+            <div class="alert alert-warning py-2">
+                <strong>Overall: Warning.</strong>
+                <ul class="mb-0">{% for r in health.reasons %}<li>{{ r }}</li>{% endfor %}</ul>
+            </div>
+        {% elif health.status == 'bad' %}
+            <div class="alert alert-danger py-2">
+                <strong>Overall: BAD.</strong>
+                <ul class="mb-0">{% for r in health.reasons %}<li>{{ r }}</li>{% endfor %}</ul>
+            </div>
+        {% else %}
+            <div class="alert alert-secondary py-2">
+                <strong>Overall: unknown.</strong>
+                {% for r in health.reasons %}{{ r }} {% endfor %}
+            </div>
+        {% endif %}
+
+        {# ───── Top summary cards ───── #}
+        <div class="row g-2 mb-3">
+            <div class="col-auto">
+                <div class="card"><div class="card-body p-2 px-3">
+                    <strong>{{ summary.active }}</strong> active
+                    <span class="text-muted">/ {{ summary.total }} total firings</span>
+                    {% if summary.severity_counts %}
+                      &nbsp;
+                      {% for sev, n in summary.severity_counts.items %}
+                        {% if sev == 'critical' %}<span class="badge bg-danger">{{ n }} critical</span>
+                        {% elif sev == 'warning' %}<span class="badge bg-warning text-dark">{{ n }} warning</span>
+                        {% else %}<span class="badge bg-info text-dark">{{ n }} {{ sev }}</span>{% endif %}
+                      {% endfor %}
+                    {% endif %}
+                </div></div>
+            </div>
+            {% if summary.last_run %}
+            <div class="col-auto">
+                <div class="card"><div class="card-body p-2 px-3">
+                    <span class="text-muted">Last engine run:</span>
+                    {{ summary.last_run.started_at|default:'—'|slice:":19" }}
+                    &nbsp;<span class="text-muted">checks</span> {{ summary.last_run.checks_run }}
+                    &nbsp;<span class="text-muted">alarms seen</span> {{ summary.last_run.alarms_seen }}
+                    &nbsp;<span class="text-muted">sent</span> {{ summary.last_run.notifications_sent }}
+                    {% if summary.last_run.errors %}
+                      &nbsp;<span class="text-danger">errors {{ summary.last_run.errors }}</span>
+                    {% endif %}
+                </div></div>
+            </div>
+            {% endif %}
+        </div>
+
+        {# ───── Per-check status panel (alarm sources) ───── #}
+        <h3 class="mt-4 mb-2" style="font-size: 1.15em;">Alarm sources (checks)</h3>
+        {% if checks %}
+        <table class="table table-sm table-hover">
+            <thead>
+                <tr>
+                    <th>Name</th>
+                    <th>Kind</th>
+                    <th>Enabled</th>
+                    <th>Last run</th>
+                    <th>Alarms seen</th>
+                    <th>Errors</th>
+                    <th>Active firings</th>
+                    <th>Last fired</th>
+                    <th>Configured</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for c in checks %}
+                <tr{% if c.errors %} class="table-danger"{% elif c.active_firings %} class="table-warning"{% endif %}>
+                    <td><code>{{ c.check_name }}</code></td>
+                    <td><code>{{ c.kind }}</code></td>
+                    <td>
+                      {% if c.enabled %}<span class="badge bg-secondary">on</span>
+                      {% else %}<span class="badge bg-light text-dark">off</span>{% endif %}
+                    </td>
+                    <td><small>{{ c.started_at|slice:":19" }}</small></td>
+                    <td>{{ c.alarms_seen }}</td>
+                    <td>
+                      {% if c.errors %}<span class="text-danger">{{ c.errors }}</span>
+                      {% else %}0{% endif %}
+                    </td>
+                    <td>
+                      {% if c.active_firings %}<strong>{{ c.active_firings }}</strong>
+                      {% else %}0{% endif %}
+                    </td>
+                    <td><small>{{ c.last_fired_at|default:'—'|slice:":19" }}</small></td>
+                    <td>
+                      {% if c.params_snapshot %}
+                        <small class="text-muted">
+                          sev={{ c.params_snapshot.severity }},
+                          cooldown={{ c.params_snapshot.cooldown_hours }}h,
+                          recipients={{ c.params_snapshot.recipients|join:',' }}
+                          {% for pk, pv in c.params_snapshot.params.items %}
+                            , {{ pk }}={{ pv }}
+                          {% endfor %}
+                        </small>
+                      {% endif %}
+                    </td>
+                </tr>
+                {% if c.error_message %}
+                <tr><td colspan="9"><pre class="mb-0 text-danger" style="font-size: 0.85em; white-space: pre-wrap;">{{ c.error_message }}</pre></td></tr>
+                {% endif %}
+                {% endfor %}
+            </tbody>
+        </table>
+        {% else %}
+            <p class="text-muted">No check runs recorded yet — engine may not have completed a pass.</p>
+        {% endif %}
+
+        {# ───── Active alarms ───── #}
+        <h3 class="mt-4 mb-2" style="font-size: 1.15em;">Alarm firings</h3>
+        <div class="mb-2">
+            <div class="btn-group btn-group-sm" role="group">
+                <a class="btn {% if state_filter == 'active' %}btn-primary{% else %}btn-outline-primary{% endif %}"
+                   href="?state=active">Active</a>
+                <a class="btn {% if state_filter == 'cleared' %}btn-primary{% else %}btn-outline-primary{% endif %}"
+                   href="?state=cleared">Cleared</a>
+                <a class="btn {% if state_filter == 'all' %}btn-primary{% else %}btn-outline-primary{% endif %}"
+                   href="?state=all">All</a>
+            </div>
+        </div>
+
+        {% if firings %}
+        <table class="table table-sm table-hover">
+            <thead>
+                <tr>
+                    <th>Severity</th>
+                    <th>Check</th>
+                    <th>Key</th>
+                    <th>First fired</th>
+                    <th>Last fired</th>
+                    <th>Cooldown until</th>
+                    <th>State</th>
+                    <th>Subject</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for f in firings %}
+                <tr id="{{ f.check_name }}:{{ f.dedupe_key }}">
+                    <td>
+                        {% if f.severity == 'critical' %}<span class="badge bg-danger">critical</span>
+                        {% elif f.severity == 'warning' %}<span class="badge bg-warning text-dark">warning</span>
+                        {% else %}<span class="badge bg-info text-dark">{{ f.severity }}</span>{% endif %}
+                    </td>
+                    <td><code>{{ f.check_name }}</code></td>
+                    <td><code>{{ f.dedupe_key }}</code></td>
+                    <td><small>{{ f.first_fired_at|slice:":19" }}</small></td>
+                    <td><small>{{ f.last_fired_at|slice:":19" }}</small></td>
+                    <td><small class="text-muted">{{ f.cooldown_until|default:'—'|slice:":19" }}</small></td>
+                    <td>
+                        {% if f.state == 'active' %}<span class="badge bg-danger">active</span>
+                        {% else %}<span class="badge bg-secondary">cleared</span>{% endif %}
+                    </td>
+                    <td>
+                        <a href="{% url 'monitor_app:alarms_detail' firing_id=f.id %}">
+                            {{ f.subject }}
+                        </a>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% else %}
+        <div class="alert alert-success">
+            No firings in state <code>{{ state_filter }}</code>.
+        </div>
+        {% endif %}
+
+        {# ───── Recent runs ───── #}
+        <h3 class="mt-4 mb-2" style="font-size: 1.15em;">Recent engine runs</h3>
+        <table class="table table-sm">
+            <thead>
+                <tr>
+                    <th>Started</th><th>Finished</th><th>Checks</th>
+                    <th>Alarms seen</th><th>Sent</th><th>Errors</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for r in recent_runs %}
+                <tr{% if r.errors %} class="table-warning"{% endif %}>
+                    <td><small>{{ r.started_at|slice:":19" }}</small></td>
+                    <td><small>{{ r.finished_at|default:'(running)'|slice:":19" }}</small></td>
+                    <td>{{ r.checks_run }}</td>
+                    <td>{{ r.alarms_seen }}</td>
+                    <td>{{ r.notifications_sent }}</td>
+                    <td>{{ r.errors }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    {% endif %}
+</div>
+{% endblock %}

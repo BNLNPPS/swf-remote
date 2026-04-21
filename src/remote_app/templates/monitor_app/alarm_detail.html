@@ -1,0 +1,83 @@
+{% extends 'base.html' %}
+
+{% block title %}Alarm {{ firing.id }} — ePIC Production Monitor{% endblock %}
+
+{% block content %}
+<div class="container mt-3" style="max-width: 1100px;">
+    <p><a href="{% url 'monitor_app:alarms_dashboard' %}">&larr; All alarms</a></p>
+
+    <h2 class="mb-3">
+        {% if firing.severity == 'critical' %}<span class="badge bg-danger">critical</span>
+        {% elif firing.severity == 'warning' %}<span class="badge bg-warning text-dark">warning</span>
+        {% else %}<span class="badge bg-info text-dark">{{ firing.severity }}</span>{% endif %}
+        {{ firing.subject }}
+    </h2>
+
+    <div class="card mb-3">
+        <div class="card-body">
+            <table class="table table-sm mb-0">
+                <tbody>
+                    <tr><th style="width:220px;">Check</th>
+                        <td><code>{{ firing.check_name }}</code></td></tr>
+                    <tr><th>Dedupe key</th>
+                        <td><code>{{ firing.dedupe_key }}</code></td></tr>
+                    <tr><th>State</th>
+                        <td>
+                          {% if firing.state == 'active' %}<span class="badge bg-danger">active</span>
+                          {% else %}<span class="badge bg-secondary">cleared</span>{% endif %}
+                          {% if firing.cleared_at %}
+                            <small class="text-muted">at {{ firing.cleared_at }}</small>
+                          {% endif %}
+                        </td></tr>
+                    <tr><th>First fired</th><td>{{ firing.first_fired_at }}</td></tr>
+                    <tr><th>Last fired</th><td>{{ firing.last_fired_at }}</td></tr>
+                    <tr><th>Last seen</th><td>{{ firing.last_seen_at }}</td></tr>
+                    <tr><th>Cooldown until</th>
+                        <td>{{ firing.cooldown_until|default:'—' }}</td></tr>
+                    <tr><th>Recipients</th>
+                        <td>{{ firing.recipients|default:'—' }}</td></tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <div class="card mb-3">
+        <div class="card-header"><strong>Body</strong></div>
+        <div class="card-body">
+            <pre style="white-space: pre-wrap; margin: 0;">{{ firing.body }}</pre>
+        </div>
+    </div>
+
+    {% if firing.data %}
+    <div class="card mb-3">
+        <div class="card-header"><strong>Context</strong></div>
+        <div class="card-body">
+            <table class="table table-sm mb-0">
+                <tbody>
+                {% for k, v in firing.data.items %}
+                    <tr><th style="width: 260px;"><code>{{ k }}</code></th>
+                        <td>{{ v }}</td></tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+    {% endif %}
+
+    <h3 class="mt-4 mb-2" style="font-size: 1.1em;">Event log</h3>
+    <table class="table table-sm table-hover">
+        <thead>
+            <tr><th>When</th><th>Action</th><th>Notes</th></tr>
+        </thead>
+        <tbody>
+            {% for e in events %}
+            <tr>
+                <td><small>{{ e.ts|slice:":19" }}</small></td>
+                <td><code>{{ e.action }}</code></td>
+                <td><small>{{ e.notes|default:'' }}</small></td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endblock %}

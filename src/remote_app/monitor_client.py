@@ -29,12 +29,16 @@ def _base():
     return settings.SWF_MONITOR_URL.rstrip('/')
 
 
-def proxy(request, path):
+def proxy(request, path, service_user=None):
     """Proxy a request to swf-monitor, return an HttpResponse.
 
     Forwards HTTP method, query parameters, request body, and authenticated
     user identity (via X-Remote-User header). Returns the upstream response
     as-is (content-type, status code, body) with URL rewriting.
+
+    service_user: fallback identity injected as X-Remote-User when no Django
+    user is authenticated. Use for service-to-service endpoints that the
+    upstream requires IsAuthenticated on (e.g. /api/panda/* viewsets).
     """
     url = f"{_base()}{path}"
     params = request.GET.dict()
@@ -43,6 +47,8 @@ def proxy(request, path):
     # Pass authenticated user identity for attribution on swf-monitor
     if hasattr(request, 'user') and request.user.is_authenticated:
         headers['X-Remote-User'] = request.user.username
+    elif service_user:
+        headers['X-Remote-User'] = service_user
 
     method = request.method.upper()
     try:

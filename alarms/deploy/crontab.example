@@ -1,0 +1,10 @@
+# swf-alarms cron entries. Install via:
+#   crontab -l > /tmp/ct.txt && cat /home/admin/github/swf-remote/alarms/deploy/crontab.example >> /tmp/ct.txt && crontab /tmp/ct.txt
+# or merge into your existing crontab manually.
+#
+# Assumes the engine is installed in its own venv at
+# /home/admin/github/swf-remote/alarms/.venv and the config lives at
+# /home/admin/github/swf-remote/alarms/config.toml
+
+# Run every 5 minutes.
+*/5 * * * * /home/admin/github/swf-remote/alarms/.venv/bin/swf-alarms-run --config /home/admin/github/swf-remote/alarms/config.toml >> /var/log/swf-alarms/cron.log 2>&1

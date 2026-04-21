@@ -92,6 +92,14 @@ SESSION_COOKIE_NAME = 'sessionid_prod'
 USE_X_FORWARDED_HOST = True
 SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 
+# swf-alarms state DB path. The dashboard views in remote_app/alarms_reader.py
+# open this file read-only; if it doesn't exist (engine hasn't run), the
+# dashboard degrades to an empty state instead of erroring.
+SWF_ALARMS_DB = config(
+    'SWF_REMOTE_ALARMS_DB',
+    default='/var/lib/swf-alarms/state.db',
+)
+
 # Authentication
 LOGIN_URL = 'login'
 LOGIN_REDIRECT_URL = 'monitor_app:prod_home'
