@@ -25,26 +25,28 @@ from . import config as config_mod
 from . import db
 from .checks import REGISTRY
 from .fetch import Client, FetchError
-from .notify import Alarm, send_email_ses
+from .notify import send_email_ses
 
 
 log = logging.getLogger("swf_alarms")
 
 
-def _cooldown_until(hours: float) -> str:
-    return (datetime.now(timezone.utc) + timedelta(hours=hours)).isoformat(
-        timespec="seconds"
-    )
+def _cooldown_until(hours: float) -> datetime:
+    return datetime.now(timezone.utc) + timedelta(hours=hours)
 
 
-def _is_in_cooldown(cooldown_until: str | None) -> bool:
-    if not cooldown_until:
+def _is_in_cooldown(cooldown_until) -> bool:
+    if cooldown_until is None:
         return False
-    try:
-        until = datetime.fromisoformat(cooldown_until)
-    except ValueError:
-        return False
-    return datetime.now(timezone.utc) < until
+    now = datetime.now(timezone.utc)
+    if isinstance(cooldown_until, str):
+        try:
+            cooldown_until = datetime.fromisoformat(cooldown_until)
+        except ValueError:
+            return False
+    if cooldown_until.tzinfo is None:
+        cooldown_until = cooldown_until.replace(tzinfo=timezone.utc)
+    return now < cooldown_until
 
 
 def _configure_logging(log_path: str | None, verbose: bool) -> None:
@@ -72,8 +74,7 @@ def main(argv: list[str] | None = None) -> int:
     _configure_logging(cfg.engine.log_path, args.verbose)
 
     log.info("run starting  config=%s  dry_run=%s", args.config, args.dry_run)
-    conn = db.connect(cfg.engine.state_db)
-    db.init_schema(conn)
+    conn = db.connect(cfg.db_dsn)
 
     run_id = db.start_run(conn)
     client = Client(cfg.engine.swf_remote_base_url, timeout=cfg.engine.request_timeout)
@@ -85,7 +86,7 @@ def main(argv: list[str] | None = None) -> int:
     error_traces: list[str] = []
 
     for check in cfg.checks:
-        check_started = db.now_iso()
+        check_started = db.now_utc()
         params_snapshot = json.dumps({
             "severity": check.severity,
             "recipients": check.recipients,

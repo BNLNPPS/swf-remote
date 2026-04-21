@@ -1,17 +1,15 @@
 {% extends 'base.html' %}
+{% load static %}
+{% load swf_fmt %}
 
 {% block title %}Alarm {{ firing.id }} — ePIC Production Monitor{% endblock %}
 
 {% block content %}
+<link rel="stylesheet" href="{% static 'css/state-colors.css' %}">
 <div class="container mt-3" style="max-width: 1100px;">
     <p><a href="{% url 'monitor_app:alarms_dashboard' %}">&larr; All alarms</a></p>
 
-    <h2 class="mb-3">
-        {% if firing.severity == 'critical' %}<span class="badge bg-danger">critical</span>
-        {% elif firing.severity == 'warning' %}<span class="badge bg-warning text-dark">warning</span>
-        {% else %}<span class="badge bg-info text-dark">{{ firing.severity }}</span>{% endif %}
-        {{ firing.subject }}
-    </h2>
+    <h2 class="mb-3">{{ firing.subject }}</h2>
 
     <div class="card mb-3">
         <div class="card-body">
@@ -21,19 +19,20 @@
                         <td><code>{{ firing.check_name }}</code></td></tr>
                     <tr><th>Dedupe key</th>
                         <td><code>{{ firing.dedupe_key }}</code></td></tr>
+                    <tr><th>Severity</th>
+                        <td class="{{ firing.severity|state_class }}">{{ firing.severity }}</td></tr>
                     <tr><th>State</th>
-                        <td>
-                          {% if firing.state == 'active' %}<span class="badge bg-danger">active</span>
-                          {% else %}<span class="badge bg-secondary">cleared</span>{% endif %}
+                        <td class="{% if firing.state == 'active' %}failed_fill{% else %}paused_fill{% endif %}">
+                          {{ firing.state }}
                           {% if firing.cleared_at %}
-                            <small class="text-muted">at {{ firing.cleared_at }}</small>
+                            <small class="text-muted">at {{ firing.cleared_at|fmt_dt }}</small>
                           {% endif %}
                         </td></tr>
-                    <tr><th>First fired</th><td>{{ firing.first_fired_at }}</td></tr>
-                    <tr><th>Last fired</th><td>{{ firing.last_fired_at }}</td></tr>
-                    <tr><th>Last seen</th><td>{{ firing.last_seen_at }}</td></tr>
+                    <tr><th>First fired</th><td>{{ firing.first_fired_at|fmt_dt }}</td></tr>
+                    <tr><th>Last fired</th><td>{{ firing.last_fired_at|fmt_dt }}</td></tr>
+                    <tr><th>Last seen</th><td>{{ firing.last_seen_at|fmt_dt }}</td></tr>
                     <tr><th>Cooldown until</th>
-                        <td>{{ firing.cooldown_until|default:'—' }}</td></tr>
+                        <td>{{ firing.cooldown_until|fmt_dt|default:'—' }}</td></tr>
                     <tr><th>Recipients</th>
                         <td>{{ firing.recipients|default:'—' }}</td></tr>
                 </tbody>
@@ -55,8 +54,14 @@
             <table class="table table-sm mb-0">
                 <tbody>
                 {% for k, v in firing.data.items %}
-                    <tr><th style="width: 260px;"><code>{{ k }}</code></th>
-                        <td>{{ v }}</td></tr>
+                    <tr>
+                        <th style="width: 260px;"><code>{{ k }}</code></th>
+                        {% if k == 'status' %}
+                            <td class="{{ v|state_class }}">{{ v }}</td>
+                        {% else %}
+                            <td>{{ v }}</td>
+                        {% endif %}
+                    </tr>
                 {% endfor %}
                 </tbody>
             </table>
@@ -72,7 +77,7 @@
         <tbody>
             {% for e in events %}
             <tr>
-                <td><small>{{ e.ts|slice:":19" }}</small></td>
+                <td>{{ e.ts|fmt_dt }}</td>
                 <td><code>{{ e.action }}</code></td>
                 <td><small>{{ e.notes|default:'' }}</small></td>
             </tr>

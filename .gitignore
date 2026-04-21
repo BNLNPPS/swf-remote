@@ -4,6 +4,9 @@ src/monitor_templates/
 # Deployment artifacts
 staticfiles/
 
+# Site-local alarm engine config (copied from config.toml.example by install.sh)
+alarms/config.toml
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[codz]

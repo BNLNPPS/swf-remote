@@ -1,12 +1,14 @@
 # swf-remote alarms
 
 Always-on proactive alarm capability running on ec2dev, fed by swf-monitor
-REST, persisted in sqlite, delivered by email (SES) today and designed to
-bolt on Mattermost, Telegram, etc. without rework. The Django side (this
-repo's `remote_app`) serves a read-only dashboard over the sqlite state
-file; the engine itself lives in this repo's `alarms/` directory but has
-**no Django coupling** — it's a standalone installable package that could
-be moved to its own repo without code changes.
+REST, persisted in **swf-remote's own Postgres DB** (same DB the Django app
+uses — no second store to manage), delivered by email (SES) today and
+designed to bolt on Mattermost, Telegram, etc. without rework. The Django
+side (this repo's `remote_app`) owns the schema (see `models.py` +
+migrations) and serves a read-only dashboard via the ORM. The standalone
+engine in `alarms/` writes to the same tables via psycopg — no Django
+import, no settings bootstrap — reading DB credentials from swf-remote's
+own `.env` so there's one source of truth.
 
 ## Why this shape
 
@@ -14,18 +16,19 @@ be moved to its own repo without code changes.
   note `profile-standalone-over-django-mgmt-commands` — operational tools
   should be portable, REST-fed, and lightweight, not wedded to one
   Django project's bootstrap.
+- **One DB, not two.** swf-remote already uses Postgres; alarm state goes
+  in the same DB. The engine writes via psycopg; Django reads via ORM.
+  No sqlite, no file-perm dance, no second persistence model to reason
+  about.
 - **All swf-monitor access flows through swf-remote's existing SSH tunnel
   and proxy.** The engine hits `/prod/api/panda/*` on loopback; it never
-  reaches BNL directly. Running the same engine from another host requires
-  only that it can reach a swf-remote-style proxy (or set up its own
-  tunnel) — no BNL SSH-key provisioning needed per consumer.
-- **Dedup + cooldown in sqlite.** Every detection is persisted; notifications
-  are rate-limited per firing. `last_seen_at` updates every tick so the
-  dashboard is always current, even when the email channel is quiet
-  inside a cooldown window.
-- **Dashboard reads sqlite directly** — no Django ORM, no migrations, no
-  coupling. `SWF_ALARMS_DB` in settings points to the file; if it's
-  missing (engine hasn't run), the dashboard degrades to an empty state.
+  reaches BNL directly. Running the engine from another host requires only
+  that it can reach a swf-remote-style proxy and the Postgres — no BNL
+  SSH-key provisioning needed per consumer.
+- **Dedup + cooldown in the `alarm_firing` table.** Every detection is
+  persisted; notifications are rate-limited per firing. `last_seen_at`
+  updates every tick so the dashboard is always current, even when the
+  email channel is quiet inside a cooldown window.
 
 ## Architecture
 
@@ -34,34 +37,38 @@ be moved to its own repo without code changes.
   │  swf-alarms engine   │  (cron */5 min)
   │  alarms/swf_alarms/  │
   │  standalone venv     │
-  └──────────┬───────────┘
-             │ https (loopback)
+  └────┬─────────────┬───┘
+       │ https       │ psycopg write
+       │ (loopback)  │
+       ▼             ▼
+  ┌─────────────────────┐   ┌──────────────────────────┐
+  │  swf-remote Django  │   │  Postgres (swf_remote)   │
+  │  /prod/api/panda/*  │──►│  alarm_run, _check_run,  │
+  │  /prod/alarms/      │   │  _firing, _firing_event  │
+  └──────────┬──────────┘   └──────────────────────────┘
+             │ SSH tunnel
              ▼
-  ┌──────────────────────┐   ┌─────────────────────────┐
-  │  swf-remote Django   │   │  sqlite state DB        │
-  │  /prod/api/panda/*   │   │  /var/lib/swf-alarms/   │
-  │  /prod/alarms/       │◄──┤  state.db               │
-  └──────────┬───────────┘   └───────▲─────────────────┘
-             │ SSH tunnel                │ writes
-             ▼                            │
-  ┌──────────────────────┐   ┌─────────────────────────┐
-  │  swf-monitor (BNL)   │   │  AWS SES                │
-  │  /api/panda/tasks/…  │   │  alarm emails           │
-  └──────────────────────┘   └─────────────────────────┘
+  ┌─────────────────────┐   ┌──────────────────────────┐
+  │  swf-monitor (BNL)  │   │  AWS SES                 │
+  │  /api/panda/tasks/… │   │  alarm emails            │
+  └─────────────────────┘   └──────────────────────────┘
 ```
 
 ## swf-remote side — what's added
 
 | File | Purpose |
 |---|---|
+| `src/remote_app/models.py` | `AlarmRun`, `AlarmCheckRun`, `AlarmFiring`, `AlarmFiringEvent`. Table names pinned via `db_table` so the engine's raw SQL doesn't depend on Django defaults. |
+| `src/remote_app/migrations/0001_initial.py` | Schema for the four alarm tables. Applied by `manage.py migrate remote_app` during deploy. |
 | `src/remote_app/views.py` → `panda_api_proxy` | Catch-all proxy for `/api/panda/<path>` that injects `X-Remote-User: swf-remote-proxy` service identity. |
-| `src/remote_app/views.py` → `alarms_dashboard`, `alarms_detail` | Dashboard views (read-only sqlite). |
-| `src/remote_app/alarms_reader.py` | Plain-sqlite3 helpers for dashboard views. No ORM. |
-| `src/remote_app/templates/monitor_app/alarms.html` | Active-alarms table + recent runs. |
+| `src/remote_app/views.py` → `alarms_dashboard`, `alarms_detail` | Dashboard views (ORM-backed). |
+| `src/remote_app/alarms_data.py` | ORM query helpers: `list_firings`, `summary`, `check_summary`, `overall_health`, etc. Returns plain dicts so templates are agnostic of model vs row. |
+| `src/remote_app/templatetags/swf_fmt.py` | `fmt_dt` (Eastern `YYYYMMDD HH:MM:SS`) and `state_class` (`*_fill` class for BigMon cell-fill). Ported trimmed-down from swf-monitor's swf_fmt. |
+| `src/remote_app/static/css/state-colors.css` | Symlink to swf-monitor's copy — one source of truth. |
+| `src/remote_app/templates/monitor_app/alarms.html` | Dashboard: health banner, summary, alarm sources, firings, runs. Cell-fill colors. |
 | `src/remote_app/templates/monitor_app/alarm_detail.html` | Single-firing detail with event log. |
 | `src/remote_app/monitor_client.py` → `proxy(service_user=...)` | Optional fallback identity for unauthenticated proxy calls. |
 | `src/remote_app/urls.py` | New routes: `api/panda/<path:path>`, `alarms/`, `alarms/<int:firing_id>/`. |
-| `src/swf_remote_project/settings.py` → `SWF_ALARMS_DB` | Path to the sqlite state file. |
 
 ## Engine side — `alarms/`
 
@@ -71,7 +78,7 @@ Standalone Python package. Not imported by Django. Install instructions in
 | File | Purpose |
 |---|---|
 | `swf_alarms/config.py` | TOML config loader (stdlib tomllib). |
-| `swf_alarms/db.py` | sqlite schema (firings, events, runs, check_runs), upsert with dedup. |
+| `swf_alarms/db.py` | psycopg layer: connect, upsert firings, log events, record runs/check_runs. Schema is owned by swf-remote migrations, not here. |
 | `swf_alarms/fetch.py` | Thin REST client. Targets swf-remote's `/api/panda/*`. |
 | `swf_alarms/notify.py` | `Alarm` dataclass + SES email sender. New channels slot in here. |
 | `swf_alarms/checks/failure_rate.py` | First check: computed_failurerate > threshold. |

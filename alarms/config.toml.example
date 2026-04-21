@@ -1,12 +1,19 @@
 # swf-alarms config — copy to config.toml and edit.
 
 [engine]
-state_db = "/var/lib/swf-alarms/state.db"
 # Use loopback through swf-remote's Apache. swf-remote owns the SSH tunnel
 # to pandaserver02; this engine never talks to BNL directly.
 swf_remote_base_url = "https://epic-devcloud.org/prod"
 request_timeout = 20
 log_path = "/var/log/swf-alarms/run.log"
+
+# Postgres for alarm state lives in swf-remote's own DB. By default the
+# engine reads SWF_REMOTE_DB_* credentials from swf-remote's .env so there
+# is ONE source of truth; override here if running the engine elsewhere.
+[db]
+# env_path = "/var/www/swf-remote/src/.env"
+# Or set an explicit DSN instead:
+# dsn = "postgresql://swf_remote:PASSWORD@localhost:5432/swf_remote"
 
 [email]
 provider = "ses"

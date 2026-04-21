@@ -1,125 +1,67 @@
-"""sqlite state store for swf-alarms.
+"""Postgres state store for swf-alarms.
 
-Schema:
-  firings — one row per (check_name, dedupe_key). Holds current state
-            (active/cleared), first/last-fired timestamps, cooldown,
-            severity, subject, body, recipients, JSON context data.
-  events  — append-only log of every state transition on a firing
-            (fired, re-confirmed, notified, notify-skipped, cleared).
-  runs    — one row per engine run; summary counters + error trace.
+The swf-remote Django app already owns a Postgres database; the alarm
+engine writes to it directly via psycopg, and the Django dashboard reads
+the same rows through its ORM. Schema is owned by swf-remote's migrations
+(see remote_app/models.py). Table names are pinned there via `db_table` so
+the SQL below can reference them without guessing app-prefixed names:
 
-Access pattern: standalone engine writes; dashboard (Django view) reads.
-No Django ORM — plain sqlite3 for minimal coupling.
+    alarm_run            AlarmRun
+    alarm_check_run      AlarmCheckRun
+    alarm_firing         AlarmFiring
+    alarm_firing_event   AlarmFiringEvent
+
+The engine remains standalone — no Django import, no settings bootstrap.
+It just needs a DSN reachable from wherever it runs. Credentials can live
+either in the engine's own config.toml or (by default) be read from
+swf-remote's existing .env so there's one source of truth.
 """
 from __future__ import annotations
 
 import json
-import sqlite3
-import sys
+import logging
 from contextlib import contextmanager
 from datetime import datetime, timezone
-from pathlib import Path
+
+import psycopg
+from psycopg.rows import dict_row
 
 
-SCHEMA = """
-CREATE TABLE IF NOT EXISTS firings (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    check_name TEXT NOT NULL,
-    dedupe_key TEXT NOT NULL,
-    first_fired_at TEXT NOT NULL,
-    last_fired_at TEXT NOT NULL,
-    last_seen_at TEXT NOT NULL,
-    cooldown_until TEXT,
-    state TEXT NOT NULL DEFAULT 'active',
-    cleared_at TEXT,
-    severity TEXT NOT NULL,
-    subject TEXT NOT NULL,
-    body TEXT NOT NULL,
-    recipients TEXT NOT NULL,
-    data_json TEXT,
-    UNIQUE(check_name, dedupe_key)
-);
-
-CREATE INDEX IF NOT EXISTS idx_firings_state ON firings(state, last_fired_at DESC);
-CREATE INDEX IF NOT EXISTS idx_firings_check ON firings(check_name, last_fired_at DESC);
-
-CREATE TABLE IF NOT EXISTS events (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    firing_id INTEGER NOT NULL,
-    ts TEXT NOT NULL,
-    action TEXT NOT NULL,
-    notes TEXT,
-    FOREIGN KEY(firing_id) REFERENCES firings(id)
-);
-
-CREATE INDEX IF NOT EXISTS idx_events_firing ON events(firing_id, ts DESC);
-
-CREATE TABLE IF NOT EXISTS runs (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    started_at TEXT NOT NULL,
-    finished_at TEXT,
-    checks_run INTEGER DEFAULT 0,
-    alarms_seen INTEGER DEFAULT 0,
-    notifications_sent INTEGER DEFAULT 0,
-    errors INTEGER DEFAULT 0,
-    error_details TEXT
-);
-
-CREATE INDEX IF NOT EXISTS idx_runs_started ON runs(started_at DESC);
-
-CREATE TABLE IF NOT EXISTS check_runs (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    run_id INTEGER NOT NULL,
-    check_name TEXT NOT NULL,
-    kind TEXT NOT NULL,
-    enabled INTEGER NOT NULL,
-    started_at TEXT NOT NULL,
-    finished_at TEXT,
-    alarms_seen INTEGER DEFAULT 0,
-    errors INTEGER DEFAULT 0,
-    error_message TEXT,
-    params_snapshot_json TEXT,
-    FOREIGN KEY(run_id) REFERENCES runs(id)
-);
-
-CREATE INDEX IF NOT EXISTS idx_check_runs_name ON check_runs(check_name, started_at DESC);
-CREATE INDEX IF NOT EXISTS idx_check_runs_run ON check_runs(run_id);
-"""
+log = logging.getLogger(__name__)
 
 
-def now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat(timespec="seconds")
+def now_utc() -> datetime:
+    return datetime.now(timezone.utc)
 
 
-def connect(path: str) -> sqlite3.Connection:
-    Path(path).parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(path, isolation_level=None)  # autocommit
-    conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA journal_mode=WAL")
-    conn.execute("PRAGMA busy_timeout=5000")
-    return conn
+def connect(dsn: str):
+    """Return a new autocommit connection with dict row factory."""
+    return psycopg.connect(dsn, autocommit=True, row_factory=dict_row)
 
 
-def init_schema(conn: sqlite3.Connection) -> None:
-    conn.executescript(SCHEMA)
+def init_schema(conn) -> None:
+    """No-op. Migrations own the schema (swf-remote/src/remote_app/migrations/).
+
+    Retained so the runner's existing init_schema() call still works.
+    """
+    return
 
 
 @contextmanager
-def transaction(conn: sqlite3.Connection):
-    conn.execute("BEGIN")
-    try:
+def transaction(conn):
+    with conn.transaction():
         yield
-        conn.execute("COMMIT")
-    except Exception:
-        conn.execute("ROLLBACK")
-        raise
 
+
+# ── firings ────────────────────────────────────────────────────────────────
 
 def get_firing(conn, check_name: str, dedupe_key: str):
-    return conn.execute(
-        "SELECT * FROM firings WHERE check_name=? AND dedupe_key=?",
-        (check_name, dedupe_key),
-    ).fetchone()
+    with conn.cursor() as cur:
+        cur.execute(
+            "SELECT * FROM alarm_firing WHERE check_name=%s AND dedupe_key=%s",
+            (check_name, dedupe_key),
+        )
+        return cur.fetchone()
 
 
 def upsert_firing(
@@ -132,120 +74,103 @@ def upsert_firing(
     body: str,
     recipients: list[str],
     data: dict,
-    cooldown_until: str | None,
+    cooldown_until: datetime | None,
 ) -> tuple[int, bool, bool]:
-    """Insert or update a firing.
+    """Insert-or-update a firing keyed on (check_name, dedupe_key).
 
-    Returns (firing_id, is_new, was_cleared) where:
-      is_new      — first time we've seen this dedupe_key
-      was_cleared — previous state was 'cleared'; we're re-opening it
+    Returns (firing_id, is_new, was_cleared):
+      is_new       — first time we've seen this dedupe_key
+      was_cleared  — previous state was 'cleared'; re-opening it
     """
-    ts = now_iso()
     existing = get_firing(conn, check_name, dedupe_key)
+    now = now_utc()
     recipients_csv = ",".join(recipients)
     data_json = json.dumps(data, default=str, sort_keys=True)
 
-    if existing is None:
-        cur = conn.execute(
-            """INSERT INTO firings
-               (check_name, dedupe_key, first_fired_at, last_fired_at,
-                last_seen_at, cooldown_until, state, severity, subject,
-                body, recipients, data_json)
-               VALUES (?, ?, ?, ?, ?, ?, 'active', ?, ?, ?, ?, ?)""",
-            (check_name, dedupe_key, ts, ts, ts, cooldown_until,
-             severity, subject, body, recipients_csv, data_json),
-        )
-        return cur.lastrowid, True, False
+    with conn.cursor() as cur:
+        if existing is None:
+            cur.execute(
+                """INSERT INTO alarm_firing
+                   (check_name, dedupe_key, first_fired_at, last_fired_at,
+                    last_seen_at, cooldown_until, state, severity, subject,
+                    body, recipients, data)
+                   VALUES (%s, %s, %s, %s, %s, %s, 'active', %s, %s, %s, %s, %s::jsonb)
+                   RETURNING id""",
+                (check_name, dedupe_key, now, now, now, cooldown_until,
+                 severity, subject, body, recipients_csv, data_json),
+            )
+            return cur.fetchone()["id"], True, False
 
-    was_cleared = existing["state"] == "cleared"
-    conn.execute(
-        """UPDATE firings SET
-           last_fired_at=?, last_seen_at=?, cooldown_until=?,
-           state='active', cleared_at=NULL,
-           severity=?, subject=?, body=?, recipients=?, data_json=?
-           WHERE id=?""",
-        (ts, ts, cooldown_until, severity, subject, body,
-         recipients_csv, data_json, existing["id"]),
-    )
+        was_cleared = existing["state"] == "cleared"
+        cur.execute(
+            """UPDATE alarm_firing SET
+               last_fired_at=%s, last_seen_at=%s, cooldown_until=%s,
+               state='active', cleared_at=NULL,
+               severity=%s, subject=%s, body=%s, recipients=%s, data=%s::jsonb
+               WHERE id=%s""",
+            (now, now, cooldown_until, severity, subject, body,
+             recipients_csv, data_json, existing["id"]),
+        )
     return existing["id"], False, was_cleared
 
 
 def clear_firing(conn, firing_id: int, note: str = "") -> None:
-    ts = now_iso()
-    conn.execute(
-        "UPDATE firings SET state='cleared', cleared_at=? WHERE id=?",
-        (ts, firing_id),
-    )
+    with conn.cursor() as cur:
+        cur.execute(
+            "UPDATE alarm_firing SET state='cleared', cleared_at=%s WHERE id=%s",
+            (now_utc(), firing_id),
+        )
     log_event(conn, firing_id, "cleared", note)
 
 
-def log_event(conn, firing_id: int, action: str, notes: str = "") -> None:
-    conn.execute(
-        "INSERT INTO events (firing_id, ts, action, notes) VALUES (?, ?, ?, ?)",
-        (firing_id, now_iso(), action, notes),
-    )
+# ── events ─────────────────────────────────────────────────────────────────
 
+def log_event(conn, firing_id: int, action: str, notes: str = "") -> None:
+    with conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO alarm_firing_event (firing_id, ts, action, notes) "
+            "VALUES (%s, %s, %s, %s)",
+            (firing_id, now_utc(), action, notes),
+        )
+
+
+# ── runs ───────────────────────────────────────────────────────────────────
 
 def start_run(conn) -> int:
-    cur = conn.execute("INSERT INTO runs (started_at) VALUES (?)", (now_iso(),))
-    return cur.lastrowid
+    with conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO alarm_run (started_at) VALUES (%s) RETURNING id",
+            (now_utc(),),
+        )
+        return cur.fetchone()["id"]
 
 
 def finish_run(conn, run_id: int, *, checks_run: int, alarms_seen: int,
-               notifications_sent: int, errors: int, error_details: str = "") -> None:
-    conn.execute(
-        """UPDATE runs SET finished_at=?, checks_run=?, alarms_seen=?,
-           notifications_sent=?, errors=?, error_details=? WHERE id=?""",
-        (now_iso(), checks_run, alarms_seen, notifications_sent,
-         errors, error_details or None, run_id),
-    )
+               notifications_sent: int, errors: int,
+               error_details: str = "") -> None:
+    with conn.cursor() as cur:
+        cur.execute(
+            """UPDATE alarm_run SET finished_at=%s, checks_run=%s,
+               alarms_seen=%s, notifications_sent=%s, errors=%s,
+               error_details=%s WHERE id=%s""",
+            (now_utc(), checks_run, alarms_seen, notifications_sent,
+             errors, error_details or '', run_id),
+        )
 
 
 def record_check_run(conn, *, run_id: int, check_name: str, kind: str,
-                     enabled: bool, started_at: str, alarms_seen: int,
+                     enabled: bool, started_at: datetime, alarms_seen: int,
                      errors: int, error_message: str = "",
                      params_snapshot_json: str | None = None) -> int:
-    """Record a single check execution inside a run."""
-    cur = conn.execute(
-        """INSERT INTO check_runs
-           (run_id, check_name, kind, enabled, started_at, finished_at,
-            alarms_seen, errors, error_message, params_snapshot_json)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-        (run_id, check_name, kind, 1 if enabled else 0, started_at,
-         now_iso(), alarms_seen, errors, error_message or None,
-         params_snapshot_json),
-    )
-    return cur.lastrowid
-
-
-def active_firings(conn):
-    return conn.execute(
-        "SELECT * FROM firings WHERE state='active' ORDER BY last_fired_at DESC"
-    ).fetchall()
-
-
-def firing_by_id(conn, firing_id: int):
-    return conn.execute("SELECT * FROM firings WHERE id=?", (firing_id,)).fetchone()
-
-
-def events_for_firing(conn, firing_id: int, limit: int = 200):
-    return conn.execute(
-        "SELECT * FROM events WHERE firing_id=? ORDER BY ts DESC LIMIT ?",
-        (firing_id, limit),
-    ).fetchall()
-
-
-def recent_runs(conn, limit: int = 50):
-    return conn.execute(
-        "SELECT * FROM runs ORDER BY started_at DESC LIMIT ?", (limit,)
-    ).fetchall()
-
-
-def cli_init():
-    """Console entry point: swf-alarms-initdb <db-path>"""
-    if len(sys.argv) != 2:
-        print("usage: swf-alarms-initdb <db-path>", file=sys.stderr)
-        sys.exit(2)
-    conn = connect(sys.argv[1])
-    init_schema(conn)
-    print(f"initialized {sys.argv[1]}")
+    with conn.cursor() as cur:
+        cur.execute(
+            """INSERT INTO alarm_check_run
+               (run_id, check_name, kind, enabled, started_at, finished_at,
+                alarms_seen, errors, error_message, params_snapshot)
+               VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb)
+               RETURNING id""",
+            (run_id, check_name, kind, enabled, started_at, now_utc(),
+             alarms_seen, errors, error_message or '',
+             params_snapshot_json),
+        )
+        return cur.fetchone()["id"]

@@ -1,15 +1,14 @@
 #!/usr/bin/env bash
-# swf-alarms install — creates venv, installs package, initialises the
-# sqlite state DB, and prepares log dirs. Safe to re-run.
+# swf-alarms install — creates venv, installs package, prepares log dir.
+# Alarm state lives in swf-remote's Postgres; schema is owned by
+# swf-remote's Django migrations and applied by its deploy script, not here.
 #
 # Usage:  bash deploy/install.sh
-# Run from the alarms/ directory (or any — it resolves its own location).
 set -euo pipefail
 
 HERE=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 VENV="$HERE/.venv"
 CONFIG="$HERE/config.toml"
-STATE_DIR="/var/lib/swf-alarms"
 LOG_DIR="/var/log/swf-alarms"
 
 echo "[swf-alarms install] repo dir:  $HERE"
@@ -27,24 +26,21 @@ if [ ! -f "$CONFIG" ]; then
     echo "[swf-alarms install] edit $CONFIG before first run"
 fi
 
-sudo mkdir -p "$STATE_DIR" "$LOG_DIR"
-# The dashboard (swf-remote Django under www-data) reads the state DB.
-# Make the DB admin-owned but www-data-readable via group.
-sudo chown admin:www-data "$STATE_DIR" "$LOG_DIR"
-sudo chmod 2775 "$STATE_DIR" "$LOG_DIR"
-
-"$VENV/bin/swf-alarms-initdb" "$STATE_DIR/state.db"
-# DB file itself: admin writes, www-data reads.
-sudo chown admin:www-data "$STATE_DIR/state.db"
-sudo chmod 660 "$STATE_DIR/state.db"
+sudo mkdir -p "$LOG_DIR"
+sudo chown admin:admin "$LOG_DIR"
+sudo chmod 775 "$LOG_DIR"
 
 echo "[swf-alarms install] done."
-echo "  venv:     $VENV"
-echo "  config:   $CONFIG"
-echo "  state:    $STATE_DIR/state.db"
-echo "  logs:     $LOG_DIR/"
+echo "  venv:    $VENV"
+echo "  config:  $CONFIG"
+echo "  logs:    $LOG_DIR/"
+echo
+echo "Schema: swf-remote's migrations own alarm_run / alarm_check_run /"
+echo "  alarm_firing / alarm_firing_event. Ensure they're applied:"
+echo "  cd /home/admin/github/swf-remote/src &&"
+echo "  /var/www/swf-remote/.venv/bin/python manage.py migrate remote_app"
 echo
 echo "Next:"
-echo "  1. edit $CONFIG  (SES region, recipients, thresholds)"
-echo "  2. one-shot test:  $VENV/bin/swf-alarms-run --config $CONFIG --dry-run -v"
-echo "  3. install cron:   see deploy/crontab.example"
+echo "  1. edit $CONFIG  (thresholds, recipients)"
+echo "  2. one-shot test: $VENV/bin/swf-alarms-run --config $CONFIG --dry-run -v"
+echo "  3. install cron:  see deploy/crontab.example"

@@ -1,13 +1,16 @@
 {% extends 'base.html' %}
+{% load static %}
+{% load swf_fmt %}
 
 {% block title %}Alarms — ePIC Production Monitor{% endblock %}
 
 {% block content %}
+<link rel="stylesheet" href="{% static 'css/state-colors.css' %}">
 <div class="container-fluid mt-3" style="max-width: 1400px;">
     <h2 class="mb-3">Alarms</h2>
 
     {% if not summary.available %}
-        <div class="alert alert-warning">
+        <div class="unknown_fill p-3 mb-3" style="border-radius:4px;">
             <strong>Alarm state DB not available.</strong>
             The swf-alarms engine may not have run yet, or its sqlite state
             file is unreachable at the configured path. Once the engine runs
@@ -17,22 +20,22 @@
 
         {# ───── Overall health banner ───── #}
         {% if health.status == 'ok' %}
-            <div class="alert alert-success py-2">
+            <div class="ok_fill p-3 mb-3" style="border-radius:4px;">
                 <strong>Overall: OK.</strong>
                 {% for r in health.reasons %}{{ r }} {% endfor %}
             </div>
         {% elif health.status == 'warn' %}
-            <div class="alert alert-warning py-2">
+            <div class="warning_fill p-3 mb-3" style="border-radius:4px;">
                 <strong>Overall: Warning.</strong>
                 <ul class="mb-0">{% for r in health.reasons %}<li>{{ r }}</li>{% endfor %}</ul>
             </div>
         {% elif health.status == 'bad' %}
-            <div class="alert alert-danger py-2">
+            <div class="failed_fill p-3 mb-3" style="border-radius:4px;">
                 <strong>Overall: BAD.</strong>
                 <ul class="mb-0">{% for r in health.reasons %}<li>{{ r }}</li>{% endfor %}</ul>
             </div>
         {% else %}
-            <div class="alert alert-secondary py-2">
+            <div class="unknown_fill p-3 mb-3" style="border-radius:4px;">
                 <strong>Overall: unknown.</strong>
                 {% for r in health.reasons %}{{ r }} {% endfor %}
             </div>
@@ -44,31 +47,35 @@
                 <div class="card"><div class="card-body p-2 px-3">
                     <strong>{{ summary.active }}</strong> active
                     <span class="text-muted">/ {{ summary.total }} total firings</span>
-                    {% if summary.severity_counts %}
-                      &nbsp;
-                      {% for sev, n in summary.severity_counts.items %}
-                        {% if sev == 'critical' %}<span class="badge bg-danger">{{ n }} critical</span>
-                        {% elif sev == 'warning' %}<span class="badge bg-warning text-dark">{{ n }} warning</span>
-                        {% else %}<span class="badge bg-info text-dark">{{ n }} {{ sev }}</span>{% endif %}
-                      {% endfor %}
-                    {% endif %}
                 </div></div>
             </div>
             {% if summary.last_run %}
             <div class="col-auto">
                 <div class="card"><div class="card-body p-2 px-3">
                     <span class="text-muted">Last engine run:</span>
-                    {{ summary.last_run.started_at|default:'—'|slice:":19" }}
+                    {{ summary.last_run.started_at|fmt_dt }}
                     &nbsp;<span class="text-muted">checks</span> {{ summary.last_run.checks_run }}
                     &nbsp;<span class="text-muted">alarms seen</span> {{ summary.last_run.alarms_seen }}
                     &nbsp;<span class="text-muted">sent</span> {{ summary.last_run.notifications_sent }}
-                    {% if summary.last_run.errors %}
-                      &nbsp;<span class="text-danger">errors {{ summary.last_run.errors }}</span>
-                    {% endif %}
+                    &nbsp;<span class="text-muted">errors</span> {{ summary.last_run.errors }}
                 </div></div>
             </div>
             {% endif %}
         </div>
+
+        {# ───── Severity counts — each count's cell filled with its severity ───── #}
+        {% if summary.severity_counts %}
+        <table class="table table-sm w-auto mb-3">
+            <thead><tr><th colspan="99">Active by severity</th></tr></thead>
+            <tbody><tr>
+                {% for sev, n in summary.severity_counts.items %}
+                    <td class="{{ sev|state_class }}" style="min-width:110px;">
+                        <strong>{{ n }}</strong> {{ sev }}
+                    </td>
+                {% endfor %}
+            </tr></tbody>
+        </table>
+        {% endif %}
 
         {# ───── Per-check status panel (alarm sources) ───── #}
         <h3 class="mt-4 mb-2" style="font-size: 1.15em;">Alarm sources (checks)</h3>
@@ -89,24 +96,22 @@
             </thead>
             <tbody>
                 {% for c in checks %}
-                <tr{% if c.errors %} class="table-danger"{% elif c.active_firings %} class="table-warning"{% endif %}>
+                <tr>
                     <td><code>{{ c.check_name }}</code></td>
                     <td><code>{{ c.kind }}</code></td>
-                    <td>
-                      {% if c.enabled %}<span class="badge bg-secondary">on</span>
-                      {% else %}<span class="badge bg-light text-dark">off</span>{% endif %}
+                    <td class="{% if c.enabled %}ok_fill{% else %}paused_fill{% endif %}">
+                        {% if c.enabled %}on{% else %}off{% endif %}
                     </td>
-                    <td><small>{{ c.started_at|slice:":19" }}</small></td>
+                    <td>{{ c.started_at|fmt_dt }}</td>
                     <td>{{ c.alarms_seen }}</td>
-                    <td>
-                      {% if c.errors %}<span class="text-danger">{{ c.errors }}</span>
-                      {% else %}0{% endif %}
+                    <td{% if c.errors %} class="error_fill"{% endif %}>
+                        {{ c.errors }}
                     </td>
-                    <td>
-                      {% if c.active_firings %}<strong>{{ c.active_firings }}</strong>
-                      {% else %}0{% endif %}
+                    <td{% if c.active_firings %} class="warning_fill"{% endif %}>
+                        {% if c.active_firings %}<strong>{{ c.active_firings }}</strong>
+                        {% else %}0{% endif %}
                     </td>
-                    <td><small>{{ c.last_fired_at|default:'—'|slice:":19" }}</small></td>
+                    <td>{{ c.last_fired_at|fmt_dt|default:'—' }}</td>
                     <td>
                       {% if c.params_snapshot %}
                         <small class="text-muted">
@@ -121,7 +126,7 @@
                     </td>
                 </tr>
                 {% if c.error_message %}
-                <tr><td colspan="9"><pre class="mb-0 text-danger" style="font-size: 0.85em; white-space: pre-wrap;">{{ c.error_message }}</pre></td></tr>
+                <tr><td colspan="9"><pre class="mb-0" style="color:firebrick;font-size:0.85em;white-space:pre-wrap;">{{ c.error_message }}</pre></td></tr>
                 {% endif %}
                 {% endfor %}
             </tbody>
@@ -130,7 +135,7 @@
             <p class="text-muted">No check runs recorded yet — engine may not have completed a pass.</p>
         {% endif %}
 
-        {# ───── Active alarms ───── #}
+        {# ───── Alarm firings ───── #}
         <h3 class="mt-4 mb-2" style="font-size: 1.15em;">Alarm firings</h3>
         <div class="mb-2">
             <div class="btn-group btn-group-sm" role="group">
@@ -160,19 +165,14 @@
             <tbody>
                 {% for f in firings %}
                 <tr id="{{ f.check_name }}:{{ f.dedupe_key }}">
-                    <td>
-                        {% if f.severity == 'critical' %}<span class="badge bg-danger">critical</span>
-                        {% elif f.severity == 'warning' %}<span class="badge bg-warning text-dark">warning</span>
-                        {% else %}<span class="badge bg-info text-dark">{{ f.severity }}</span>{% endif %}
-                    </td>
+                    <td class="{{ f.severity|state_class }}">{{ f.severity }}</td>
                     <td><code>{{ f.check_name }}</code></td>
                     <td><code>{{ f.dedupe_key }}</code></td>
-                    <td><small>{{ f.first_fired_at|slice:":19" }}</small></td>
-                    <td><small>{{ f.last_fired_at|slice:":19" }}</small></td>
-                    <td><small class="text-muted">{{ f.cooldown_until|default:'—'|slice:":19" }}</small></td>
-                    <td>
-                        {% if f.state == 'active' %}<span class="badge bg-danger">active</span>
-                        {% else %}<span class="badge bg-secondary">cleared</span>{% endif %}
+                    <td>{{ f.first_fired_at|fmt_dt }}</td>
+                    <td>{{ f.last_fired_at|fmt_dt }}</td>
+                    <td>{{ f.cooldown_until|fmt_dt|default:'—' }}</td>
+                    <td class="{% if f.state == 'active' %}failed_fill{% else %}paused_fill{% endif %}">
+                        {{ f.state }}
                     </td>
                     <td>
                         <a href="{% url 'monitor_app:alarms_detail' firing_id=f.id %}">
@@ -184,7 +184,7 @@
             </tbody>
         </table>
         {% else %}
-        <div class="alert alert-success">
+        <div class="ok_fill p-3 mb-3" style="border-radius:4px;">
             No firings in state <code>{{ state_filter }}</code>.
         </div>
         {% endif %}
@@ -200,13 +200,13 @@
             </thead>
             <tbody>
                 {% for r in recent_runs %}
-                <tr{% if r.errors %} class="table-warning"{% endif %}>
-                    <td><small>{{ r.started_at|slice:":19" }}</small></td>
-                    <td><small>{{ r.finished_at|default:'(running)'|slice:":19" }}</small></td>
+                <tr>
+                    <td>{{ r.started_at|fmt_dt }}</td>
+                    <td>{{ r.finished_at|fmt_dt|default:'(running)' }}</td>
                     <td>{{ r.checks_run }}</td>
                     <td>{{ r.alarms_seen }}</td>
                     <td>{{ r.notifications_sent }}</td>
-                    <td>{{ r.errors }}</td>
+                    <td{% if r.errors %} class="error_fill"{% endif %}>{{ r.errors }}</td>
                 </tr>
                 {% endfor %}
             </tbody>
