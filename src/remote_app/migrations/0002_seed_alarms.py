@@ -18,6 +18,7 @@ ALARM_CONFIGS = [
             'enabled': True,
             'severity': 'warning',
             'recipients': ['srahman1@bnl.gov', 'wenaus@gmail.com'],
+            'renotification_window_hours': 24,
             'params': {
                 'threshold': 0.03,
                 'days_window': 1,
@@ -41,6 +42,7 @@ ALARM_CONFIGS = [
             'enabled': True,
             'severity': 'info',
             'recipients': ['wenaus@gmail.com'],
+            'renotification_window_hours': 48,
             'params': {
                 'threshold': 0.05,
                 'days_window': 1,

@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import json
 import time
+import uuid
 
 from django.contrib.auth.decorators import login_required
 from django.http import HttpResponse, JsonResponse
@@ -29,7 +30,7 @@ from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_POST
 
 from . import alarms_data
-from .models import Entry, EntryVersion
+from .models import Entry, EntryContext, EntryVersion
 from .signals import set_changed_by
 
 
@@ -74,6 +75,7 @@ def alarms_dashboard(request):
         'hours': hours,
         'summary_rows': summary_rows,
         'sections': sections,
+        'teams': alarms_data.list_teams(),
         'health': alarms_data.engine_health(),
         'recent_runs': alarms_data.recent_runs(limit=20),
     })
@@ -107,16 +109,21 @@ def alarm_config_edit(request, entry_id: str):
     versions = alarms_data.versions_for(alarm.id, limit=50)
 
     data = alarm.data or {}
+    # First-class form fields — separate from the JSON editor so ops
+    # can tweak routing/severity without JSON-syntax risk.
     return render(request, 'monitor_app/alarm_config_edit.html', {
         'alarm': alarm,
         'alarm_entry_id': entry_id,
         'title': alarm.title or '',
         'content': alarm.content or '',
         'line_count': (alarm.content or '').count('\n') + 1,
+        'enabled': bool(data.get('enabled', True)),
+        'severity': data.get('severity', 'warning'),
+        'recipients_text': ', '.join(data.get('recipients') or []),
+        'renotification_window_hours': data.get('renotification_window_hours') or 0,
+        # Remaining structured data — only kind + params now that the
+        # routing/severity fields are first-class.
         'data_json': json.dumps({
-            'enabled': bool(data.get('enabled', True)),
-            'severity': data.get('severity', 'warning'),
-            'recipients': list(data.get('recipients') or []),
             'kind': data.get('kind', ''),
             'params': dict(data.get('params') or {}),
         }, indent=2, sort_keys=True),
@@ -154,9 +161,24 @@ def alarm_config_save(request, entry_id: str):
 
     # Merge partial edits onto existing data, preserving entry_id.
     existing_data = dict(alarm.data or {})
-    for k in ('enabled', 'severity', 'recipients', 'params', 'kind'):
+    # Structured (JSON) block covers kind + params only now.
+    for k in ('kind', 'params'):
         if k in new_partial:
             existing_data[k] = new_partial[k]
+    # First-class fields come at the top level of the payload.
+    if 'enabled' in payload:
+        existing_data['enabled'] = bool(payload['enabled'])
+    if 'severity' in payload:
+        existing_data['severity'] = payload['severity']
+    if 'recipients' in payload:
+        existing_data['recipients'] = alarms_data.parse_recipients_input(
+            payload['recipients'])
+    if 'renotification_window_hours' in payload:
+        try:
+            existing_data['renotification_window_hours'] = float(
+                payload['renotification_window_hours'])
+        except (TypeError, ValueError):
+            pass
     if 'entry_id' not in existing_data:
         existing_data['entry_id'] = entry_id  # keep slug stable
 
@@ -188,6 +210,135 @@ def alarm_config_version(request, entry_id: str, version_num: int):
         return JsonResponse({'error': 'not found'}, status=404)
     try:
         v = EntryVersion.objects.get(entry_id=alarm.id, version_num=version_num)
+    except EntryVersion.DoesNotExist:
+        return JsonResponse({'error': 'version not found'}, status=404)
+    return JsonResponse({
+        'version_num': v.version_num,
+        'title': v.title,
+        'content': v.content,
+        'data': v.data,
+        'changed_by': v.changed_by,
+        'timestamp': v.timestamp,
+    })
+
+
+# ── teams ─────────────────────────────────────────────────────────────────
+
+def _team_at_name(raw: str) -> str:
+    """Normalise to '@<name>'. Strips leading @s and whitespace."""
+    raw = (raw or '').strip()
+    raw = raw.lstrip('@')
+    return '@' + raw if raw else ''
+
+
+@csrf_exempt
+@require_POST
+def team_create(request):
+    """Create a new team entry. POST body JSON: {name, title, content}.
+
+    Redirects to the editor page (well — returns JSON with edit URL;
+    client navigates).
+    """
+    try:
+        payload = json.loads(request.body or b'{}')
+    except json.JSONDecodeError as e:
+        return JsonResponse({'error': f'bad json: {e}'}, status=400)
+
+    at_name = _team_at_name(payload.get('name') or '')
+    if not at_name or at_name == '@':
+        return JsonResponse({'error': 'name required'}, status=400)
+
+    try:
+        ctx = EntryContext.objects.get(name='teams')
+    except EntryContext.DoesNotExist:
+        return JsonResponse({'error': 'teams context missing — run migrations'},
+                            status=500)
+
+    if Entry.objects.filter(context=ctx, kind='team', name=at_name).exists():
+        return JsonResponse({'error': f'team {at_name} already exists'},
+                            status=409)
+
+    changed_by = 'web_ui'
+    if request.user.is_authenticated:
+        changed_by += f':{request.user.username}'
+    set_changed_by(changed_by)
+
+    e = Entry.objects.create(
+        id=str(uuid.uuid4()),
+        title=payload.get('title') or at_name[1:].capitalize(),
+        content=(payload.get('content') or '').strip(),
+        kind='team',
+        context=ctx,
+        name=at_name,
+        data={'entry_id': f'team_{at_name[1:]}'},
+        status='active',
+        archived=False,
+        timestamp_created=time.time(),
+        timestamp_modified=time.time(),
+    )
+    return JsonResponse({
+        'id': e.id,
+        'name': e.name,
+        'edit_url': f'/alarms/teams/{at_name}/edit/',
+    })
+
+
+def _require_team(at_name: str) -> Entry | None:
+    return alarms_data.get_team(at_name)
+
+
+def team_edit(request, at_name: str):
+    team = _require_team(at_name)
+    if team is None:
+        return HttpResponse(f'Team {at_name} not found', status=404,
+                            content_type='text/plain')
+    versions = alarms_data.versions_for(team.id, limit=50)
+    return render(request, 'monitor_app/team_edit.html', {
+        'team': team,
+        'team_name': team.name,
+        'title': team.title or '',
+        'content': team.content or '',
+        'versions_json': json.dumps(versions, default=str),
+    })
+
+
+@csrf_exempt
+@require_POST
+def team_save(request, at_name: str):
+    team = _require_team(at_name)
+    if team is None:
+        return JsonResponse({'error': 'not found'}, status=404)
+    try:
+        payload = json.loads(request.body or b'{}')
+    except json.JSONDecodeError as e:
+        return JsonResponse({'error': f'bad json: {e}'}, status=400)
+
+    changed_by = 'autosave' if payload.get('autosave') else 'web_ui'
+    if request.user.is_authenticated:
+        changed_by = f'{changed_by}:{request.user.username}'
+    set_changed_by(changed_by)
+
+    if 'title' in payload:
+        team.title = payload['title'] or ''
+    if 'content' in payload:
+        team.content = payload['content'] or ''
+    team.timestamp_modified = time.time()
+    team.save()
+
+    latest = (EntryVersion.objects.filter(entry=team)
+              .order_by('-version_num').values('version_num').first())
+    return JsonResponse({
+        'version_num': latest['version_num'] if latest else 0,
+        'modified': team.timestamp_modified,
+    })
+
+
+def team_version(request, at_name: str, version_num: int):
+    team = _require_team(at_name)
+    if team is None:
+        return JsonResponse({'error': 'not found'}, status=404)
+    try:
+        v = EntryVersion.objects.get(entry_id=team.id, version_num=version_num)
     except EntryVersion.DoesNotExist:
         return JsonResponse({'error': 'version not found'}, status=404)
     return JsonResponse({

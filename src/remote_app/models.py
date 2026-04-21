@@ -26,6 +26,8 @@ VALID_KINDS = (
     'alarm',       # alarm configuration
     'event',       # alarm firing (fire_time, clear_time, state in data)
     'engine_run',  # one swf-alarms engine tick, with aggregate counters
+    'team',        # named recipient alias; Entry.name='@<teamname>',
+                   # content holds whitespace-delimited emails.
     'memory',      # generic note, matches tjai
     'list',        # matches tjai
     'action',      # future: scheduled actions, matches tjai

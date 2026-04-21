@@ -139,6 +139,10 @@ def create_event(conn, *, alarm_entry_id: str, dedupe_key: str,
         'alarm_config_id': alarm_config_uuid,
         **extra_data,
     }
+    # last_notified is set now because create_event always accompanies an
+    # initial notification attempt (or a dry-run skip). Engine re-notify
+    # logic compares (now - last_notified) against the per-alarm window.
+    data['last_notified'] = now
     new_id = new_uuid()
     with conn.cursor() as cur:
         cur.execute(
@@ -164,6 +168,68 @@ def touch_event_last_seen(conn, event_uuid: str) -> None:
                WHERE id = %s""",
             (now, now, event_uuid),
         )
+
+
+def mark_event_notified(conn, event_uuid: str) -> None:
+    """Set data.last_notified = now on an event — bumped on every email."""
+    now = now_ts()
+    with conn.cursor() as cur:
+        cur.execute(
+            """UPDATE entry
+               SET data = jsonb_set(data, '{last_notified}', to_jsonb(%s::float8), true),
+                   timestamp_modified = %s
+               WHERE id = %s""",
+            (now, now, event_uuid),
+        )
+
+
+def resolve_recipients(conn, tokens: list[str] | None) -> tuple[list[str], list[str]]:
+    """Expand @<team> tokens into their member emails using the DB.
+
+    Same contract as remote_app.alarms_data.expand_recipients(): returns
+    (emails, unresolved). Tokens may be emails or @<team>; comma/whitespace
+    separators already split by the caller.
+    """
+    if not tokens:
+        return [], []
+    emails: list[str] = []
+    unresolved: list[str] = []
+    for tok in tokens:
+        t = (tok or '').strip()
+        if not t:
+            continue
+        if t.startswith('@'):
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT content FROM entry WHERE context_id='teams' "
+                    "AND kind='team' AND name=%s AND archived=FALSE "
+                    "AND deleted_at IS NULL",
+                    (t,),
+                )
+                row = cur.fetchone()
+            if row is None or not (row.get('content') or '').strip():
+                unresolved.append(t)
+                continue
+            for part in _split_tokens(row['content']):
+                emails.append(part)
+        else:
+            emails.append(t)
+    # Dedup case-insensitively on emails while preserving order.
+    seen: set[str] = set()
+    final: list[str] = []
+    for e in emails:
+        k = e.lower()
+        if k in seen:
+            continue
+        seen.add(k)
+        final.append(e)
+    return final, unresolved
+
+
+def _split_tokens(s: str) -> list[str]:
+    for sep in [',', ';', '\n', '\r', '\t']:
+        s = s.replace(sep, ' ')
+    return [t.strip() for t in s.split(' ') if t.strip()]
 
 
 def clear_event(conn, event_uuid: str) -> None:

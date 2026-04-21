@@ -12,6 +12,7 @@ from .models import Entry, EntryContext, EntryVersion
 
 
 CONTEXT_NAME = 'swf-alarms'
+TEAMS_CONTEXT = 'teams'
 
 
 def _active_alarm_configs_qs():
@@ -174,6 +175,114 @@ def engine_health() -> dict:
 
 
 # ── internal helpers ───────────────────────────────────────────────────────
+
+# ── teams ────────────────────────────────────────────────────────────────
+
+def list_teams() -> list[dict]:
+    """All non-archived teams in the 'teams' context."""
+    qs = (Entry.objects
+          .filter(context_id=TEAMS_CONTEXT, kind='team',
+                  archived=False, deleted_at__isnull=True)
+          .order_by('name'))
+    out = []
+    for e in qs:
+        out.append({
+            'id': e.id,
+            'name': e.name,                       # '@prodops'
+            'title': e.title,
+            'content': e.content,
+            'members': _parse_recipient_tokens(e.content),
+            'created': e.timestamp_created,
+            'modified': e.timestamp_modified,
+        })
+    return out
+
+
+def get_team(at_name: str) -> Entry | None:
+    """Fetch a team by its @name. Accepts with-or-without leading '@'."""
+    if not at_name:
+        return None
+    if not at_name.startswith('@'):
+        at_name = '@' + at_name
+    return (Entry.objects
+            .filter(context_id=TEAMS_CONTEXT, kind='team', name=at_name,
+                    archived=False, deleted_at__isnull=True)
+            .first())
+
+
+def get_team_by_id(entry_id: str) -> Entry | None:
+    try:
+        return Entry.objects.get(id=entry_id, context_id=TEAMS_CONTEXT,
+                                 kind='team', deleted_at__isnull=True)
+    except Entry.DoesNotExist:
+        return None
+
+
+# ── recipient parsing / expansion ────────────────────────────────────────
+
+def _parse_recipient_tokens(raw) -> list[str]:
+    """Split a string or list of strings into normalised recipient tokens.
+
+    Tokens may be separated by commas, whitespace, or both. Blank tokens
+    dropped. Each token is either an email address or an @<teamname>.
+    Returns the list in the order given, deduped (case-insensitive match
+    for emails; @names kept as-is).
+    """
+    if raw is None:
+        return []
+    if isinstance(raw, (list, tuple)):
+        parts: list[str] = []
+        for chunk in raw:
+            parts.extend(_parse_recipient_tokens(chunk))
+        return _dedup_preserve(parts)
+    # String path
+    s = str(raw)
+    # Normalise commas to whitespace for a single split.
+    for sep in [',', ';', '\n', '\r', '\t']:
+        s = s.replace(sep, ' ')
+    tokens = [t.strip() for t in s.split(' ')]
+    return _dedup_preserve([t for t in tokens if t])
+
+
+def _dedup_preserve(seq: list[str]) -> list[str]:
+    seen: set[str] = set()
+    out: list[str] = []
+    for t in seq:
+        key = t.lower() if '@' in t and not t.startswith('@') else t
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(t)
+    return out
+
+
+def parse_recipients_input(text) -> list[str]:
+    """Public entry point used by views/engine to normalise user input."""
+    return _parse_recipient_tokens(text)
+
+
+def expand_recipients(tokens) -> tuple[list[str], list[str]]:
+    """Expand @<team> tokens into their member emails.
+
+    Returns (emails, unresolved). `emails` is the final dedup'd list of
+    deliverable addresses. `unresolved` is a list of @<team> tokens that
+    didn't resolve — callers should log but not fail on those.
+    """
+    final: list[str] = []
+    unresolved: list[str] = []
+    for tok in _parse_recipient_tokens(tokens):
+        if tok.startswith('@'):
+            team = get_team(tok)
+            if team is None or not team.content.strip():
+                unresolved.append(tok)
+                continue
+            final.extend(_parse_recipient_tokens(team.content))
+        else:
+            final.append(tok)
+    return _dedup_preserve(final), unresolved
+
+
+# ── internal helpers ─────────────────────────────────────────────────────
 
 def _event_entry_id_for(alarm_entry_id: str) -> str:
     if alarm_entry_id.startswith('alarm_'):

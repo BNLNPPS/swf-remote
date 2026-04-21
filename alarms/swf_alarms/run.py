@@ -104,7 +104,16 @@ def main(argv: list[str] | None = None) -> int:
         fn = REGISTRY[kind]
         params = dict(data.get("params") or {})
         severity = data.get("severity", "warning")
-        recipients = list(data.get("recipients") or [])
+        raw_recipients = list(data.get("recipients") or [])
+        # Resolve @<team> tokens to member emails via DB lookup.
+        recipients, unresolved_teams = db.resolve_recipients(conn, raw_recipients)
+        if unresolved_teams:
+            log.warning("alarm %s: unresolved team(s) %s — skipped",
+                        alarm_entry_id, unresolved_teams)
+        # Per-alarm renotification window (hours). 0 / missing = no
+        # re-notification — a still-firing entity stays quiet until clear.
+        renotification_window_hours = float(
+            data.get("renotification_window_hours") or 0)
 
         check_seen = 0
         check_err = 0
@@ -128,41 +137,43 @@ def main(argv: list[str] | None = None) -> int:
                 alarms_seen += 1
                 detected_keys.add(det.dedupe_key)
                 existing = active_by_key.get(det.dedupe_key)
-                if existing is not None:
-                    # Already firing; bump last_seen, no new email.
-                    db.touch_event_last_seen(conn, existing["id"])
-                    continue
-
-                # New firing — create event entry, send email.
                 full_body = _compose_body(alarm.get("content") or "",
                                           det.body_context)
-                event_uuid = db.create_event(
-                    conn,
-                    alarm_entry_id=alarm_entry_id,
-                    dedupe_key=det.dedupe_key,
-                    severity=severity,
-                    subject=det.subject,
-                    body=full_body,
-                    recipients=recipients,
-                    extra_data=det.extra_data,
-                    alarm_config_uuid=alarm["id"],
-                )
-                if args.dry_run or not recipients:
-                    continue
-                sent = send_email_ses(
-                    Alarm(
-                        check_name=alarm_entry_id,
+
+                if existing is None:
+                    # NEW entity crosses threshold → create event + email.
+                    event_uuid = db.create_event(
+                        conn,
+                        alarm_entry_id=alarm_entry_id,
                         dedupe_key=det.dedupe_key,
                         severity=severity,
                         subject=det.subject,
                         body=full_body,
                         recipients=recipients,
-                        data=det.extra_data,
-                    ),
-                    region=cfg.email.region,
-                    from_addr=cfg.email.from_addr,
-                )
-                if sent:
+                        extra_data=det.extra_data,
+                        alarm_config_uuid=alarm["id"],
+                    )
+                    if _try_send(args.dry_run, recipients, severity,
+                                 alarm_entry_id, det, full_body, cfg):
+                        db.mark_event_notified(conn, event_uuid)
+                        notifications_sent += 1
+                    continue
+
+                # Same entity already firing — always bump last_seen.
+                db.touch_event_last_seen(conn, existing["id"])
+
+                # Re-notify only if a window is set and enough time has
+                # elapsed since the last email.
+                if renotification_window_hours <= 0:
+                    continue
+                last_notified = float(
+                    (existing.get("data") or {}).get("last_notified") or 0)
+                if (time.time() - last_notified) < renotification_window_hours * 3600:
+                    continue
+
+                if _try_send(args.dry_run, recipients, severity,
+                             alarm_entry_id, det, full_body, cfg):
+                    db.mark_event_notified(conn, existing["id"])
                     notifications_sent += 1
         except FetchError as e:
             log.error("alarm %s fetch failed: %s", alarm_entry_id, e)
@@ -218,6 +229,28 @@ def _compose_body(alarm_description: str, detail: str) -> str:
     if alarm_description and alarm_description.strip():
         return f"{alarm_description.rstrip()}\n\n---\n\n{detail}"
     return detail
+
+
+def _try_send(dry_run: bool, recipients, severity: str,
+              alarm_entry_id: str, det, body: str, cfg) -> bool:
+    """Send SES unless dry-run or no recipients. Returns True on success."""
+    if dry_run or not recipients:
+        return False
+    from .checks import Detection  # noqa: F401 — helps mypy; import is free
+    ok = send_email_ses(
+        Alarm(
+            check_name=alarm_entry_id,
+            dedupe_key=det.dedupe_key,
+            severity=severity,
+            subject=det.subject,
+            body=body,
+            recipients=list(recipients),
+            data=det.extra_data,
+        ),
+        region=cfg.email.region,
+        from_addr=cfg.email.from_addr,
+    )
+    return ok
 
 
 if __name__ == "__main__":

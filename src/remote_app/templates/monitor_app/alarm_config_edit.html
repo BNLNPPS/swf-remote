@@ -44,15 +44,46 @@
     <input type="text" id="title-input" class="form-control" value="{{ title }}"
            maxlength="255" placeholder="Short human-readable title">
 
+    <div class="row mt-3 g-3" style="max-width: 1000px;">
+        <div class="col-auto">
+            <label class="form-label text-muted" style="font-size:0.85em;">Enabled</label><br>
+            <div class="form-check form-switch">
+                <input class="form-check-input" type="checkbox" id="enabled-input"
+                       {% if enabled %}checked{% endif %}>
+            </div>
+        </div>
+        <div class="col-auto">
+            <label class="form-label text-muted" style="font-size:0.85em;">Severity</label>
+            <select id="severity-input" class="form-select form-select-sm" style="width:140px;">
+                <option value="info"     {% if severity == 'info' %}selected{% endif %}>info</option>
+                <option value="warning"  {% if severity == 'warning' %}selected{% endif %}>warning</option>
+                <option value="critical" {% if severity == 'critical' %}selected{% endif %}>critical</option>
+            </select>
+        </div>
+        <div class="col-auto">
+            <label class="form-label text-muted" style="font-size:0.85em;">Re-notification window (hours)</label>
+            <input type="number" id="renotification-input" class="form-control form-control-sm"
+                   value="{{ renotification_window_hours }}" min="0" step="0.5" style="width:140px;">
+        </div>
+    </div>
+
+    <h3 style="font-size:1em;" class="mt-3">Recipients</h3>
+    <p class="text-muted" style="font-size:0.85em;">
+      Email addresses and <code>@team</code> names, separated by commas or whitespace. Examples:
+      <code>@prodops</code>, <code>alice@example.com, @prodops</code>.
+    </p>
+    <input type="text" id="recipients-input" class="form-control" value="{{ recipients_text }}"
+           placeholder="@team1, user@example.com, …">
+
     <h3 style="font-size:1em;" class="mt-3">Description / email body (markdown)</h3>
     <div id="content-editor">
         <textarea id="editor">{{ content }}</textarea>
     </div>
 
-    <h3 style="font-size:1em;" class="mt-4">Parameters &amp; routing (JSON)</h3>
+    <h3 style="font-size:1em;" class="mt-4">Check parameters (JSON)</h3>
     <p class="text-muted" style="font-size:0.85em;">
-      Keys: <code>enabled</code> (bool), <code>severity</code> (info|warning|critical),
-      <code>recipients</code> (list[str]), <code>kind</code>, <code>params</code> (object).
+      Keys: <code>kind</code> (check kind, e.g. <code>task_failure_rate</code>),
+      <code>params</code> (object with kind-specific fields: threshold, days_window, …).
     </p>
     <div id="data-editor">
         <textarea id="data-json">{{ data_json }}</textarea>
@@ -82,8 +113,17 @@
         lineNumbers: true, tabSize: 2,
     });
 
-    var titleInput = document.getElementById('title-input');
-    var lastSavedTitle   = titleInput.value;
+    var titleInput        = document.getElementById('title-input');
+    var enabledInput      = document.getElementById('enabled-input');
+    var severityInput     = document.getElementById('severity-input');
+    var renotificationInp = document.getElementById('renotification-input');
+    var recipientsInput   = document.getElementById('recipients-input');
+
+    var lastSavedTitle         = titleInput.value;
+    var lastSavedEnabled       = enabledInput.checked;
+    var lastSavedSeverity      = severityInput.value;
+    var lastSavedRenotification = renotificationInp.value;
+    var lastSavedRecipients    = recipientsInput.value;
     var lastSavedContent = cmContent.getValue();
     var lastSavedData    = cmData.getValue();
 
@@ -95,6 +135,10 @@
 
     function save(isAutosave) {
         var titleVal = titleInput.value;
+        var enabledVal = enabledInput.checked;
+        var severityVal = severityInput.value;
+        var renotificationVal = renotificationInp.value;
+        var recipientsVal = recipientsInput.value;
         var contentVal = cmContent.getValue();
         var dataStr = cmData.getValue();
         var parsed;
@@ -103,8 +147,14 @@
             setIndicator('error', 'Invalid JSON in params: ' + e.message);
             return Promise.reject(e);
         }
-        if (isAutosave && titleVal === lastSavedTitle &&
-            contentVal === lastSavedContent && dataStr === lastSavedData) {
+        if (isAutosave &&
+            titleVal === lastSavedTitle &&
+            enabledVal === lastSavedEnabled &&
+            severityVal === lastSavedSeverity &&
+            renotificationVal === lastSavedRenotification &&
+            recipientsVal === lastSavedRecipients &&
+            contentVal === lastSavedContent &&
+            dataStr === lastSavedData) {
             return Promise.resolve();
         }
         setIndicator('saving', isAutosave ? 'Autosaving…' : 'Saving…');
@@ -112,14 +162,24 @@
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-                title: titleVal, content: contentVal, data: parsed,
+                title: titleVal,
+                enabled: enabledVal,
+                severity: severityVal,
+                renotification_window_hours: parseFloat(renotificationVal || '0'),
+                recipients: recipientsVal,
+                content: contentVal,
+                data: parsed,
                 autosave: !!isAutosave,
             }),
         }).then(function(r) {
             if (!r.ok) return r.json().then(function(j) { throw new Error(j.error || ('HTTP ' + r.status)); });
             return r.json();
         }).then(function(j) {
-            lastSavedTitle   = titleVal;
+            lastSavedTitle         = titleVal;
+            lastSavedEnabled       = enabledVal;
+            lastSavedSeverity      = severityVal;
+            lastSavedRenotification = renotificationVal;
+            lastSavedRecipients    = recipientsVal;
             lastSavedContent = contentVal;
             lastSavedData    = dataStr;
             try { localStorage.removeItem(LOCAL_KEY); } catch (e) {}
@@ -142,6 +202,10 @@
         try {
             localStorage.setItem(LOCAL_KEY, JSON.stringify({
                 title: titleInput.value,
+                enabled: enabledInput.checked,
+                severity: severityInput.value,
+                renotification_window_hours: renotificationInp.value,
+                recipients: recipientsInput.value,
                 content: cmContent.getValue(),
                 data: cmData.getValue(),
                 ts: Date.now(),
@@ -151,6 +215,10 @@
     cmContent.on('change', backup);
     cmData.on('change', backup);
     titleInput.addEventListener('input', backup);
+    enabledInput.addEventListener('change', backup);
+    severityInput.addEventListener('change', backup);
+    renotificationInp.addEventListener('input', backup);
+    recipientsInput.addEventListener('input', backup);
 
     // Flush on unload (best-effort).
     window.addEventListener('beforeunload', function() {
@@ -158,11 +226,21 @@
         var contentVal = cmContent.getValue();
         var dataStr = cmData.getValue();
         if (titleVal === lastSavedTitle &&
+            enabledInput.checked === lastSavedEnabled &&
+            severityInput.value === lastSavedSeverity &&
+            renotificationInp.value === lastSavedRenotification &&
+            recipientsInput.value === lastSavedRecipients &&
             contentVal === lastSavedContent && dataStr === lastSavedData) return;
         try {
             var blob = new Blob([JSON.stringify({
-                title: titleVal, content: contentVal,
-                data: JSON.parse(dataStr), autosave: true,
+                title: titleVal,
+                enabled: enabledInput.checked,
+                severity: severityInput.value,
+                renotification_window_hours: parseFloat(renotificationInp.value || '0'),
+                recipients: recipientsInput.value,
+                content: contentVal,
+                data: JSON.parse(dataStr),
+                autosave: true,
             })], { type: 'application/json' });
             navigator.sendBeacon(SAVE_URL, blob);
         } catch (e) {}
@@ -240,14 +318,21 @@
         fetch(VERSION_URL + n + '/')
             .then(function(r) { return r.json(); })
             .then(function(j) {
+                var d = j.data || {};
                 titleInput.value = j.title || '';
+                enabledInput.checked = !!d.enabled;
+                if (d.severity) severityInput.value = d.severity;
+                if (d.renotification_window_hours !== undefined)
+                    renotificationInp.value = d.renotification_window_hours;
+                if (Array.isArray(d.recipients)) {
+                    recipientsInput.value = d.recipients.join(', ');
+                } else if (d.recipients) {
+                    recipientsInput.value = String(d.recipients);
+                }
                 cmContent.setValue(j.content || '');
                 try { cmData.setValue(JSON.stringify({
-                    enabled: (j.data || {}).enabled,
-                    severity: (j.data || {}).severity,
-                    recipients: (j.data || {}).recipients,
-                    kind: (j.data || {}).kind,
-                    params: (j.data || {}).params,
+                    kind: d.kind,
+                    params: d.params,
                 }, null, 2)); } catch (e) {}
                 setIndicator('saved', 'v' + n + ' loaded — edit and save to commit.');
             })
@@ -259,6 +344,11 @@
             if (!local) return;
             if (!confirm('Restore from local browser backup? Unsaved server state will be overwritten on save.')) return;
             titleInput.value = local.title || '';
+            if (local.enabled !== undefined)  enabledInput.checked = !!local.enabled;
+            if (local.severity)               severityInput.value = local.severity;
+            if (local.renotification_window_hours !== undefined)
+                renotificationInp.value = local.renotification_window_hours;
+            if (local.recipients !== undefined) recipientsInput.value = local.recipients;
             cmContent.setValue(local.content || '');
             cmData.setValue(local.data || '{}');
             setIndicator('saved', 'Local backup restored — save to commit.');

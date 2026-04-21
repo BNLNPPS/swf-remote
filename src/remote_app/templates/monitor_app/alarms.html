@@ -32,6 +32,72 @@
         </div>
     {% endif %}
 
+    {# ─── Teams section ─── #}
+    <section class="mt-4 mb-4">
+        <h3 style="font-size: 1.15em;" class="mb-2">Teams
+            <span class="text-muted" style="font-size:0.85em;">
+              — reusable recipient lists, referenced as <code>@teamname</code>
+            </span>
+        </h3>
+        {% if teams %}
+        <table class="table table-sm table-hover" style="max-width:1100px;">
+            <thead>
+                <tr>
+                    <th>Name</th>
+                    <th>Title</th>
+                    <th>Members</th>
+                    <th>Modified</th>
+                    <th></th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for t in teams %}
+                <tr>
+                    <td><code>{{ t.name }}</code></td>
+                    <td>{{ t.title|default:'' }}</td>
+                    <td><small>{{ t.members|join:' ' }}</small></td>
+                    <td><small>{{ t.modified|fmt_dt }}</small></td>
+                    <td>
+                        <a class="btn btn-sm btn-outline-primary"
+                           href="{% url 'monitor_app:team_edit' at_name=t.name %}">Edit</a>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% else %}
+        <p class="text-muted">No teams defined yet.</p>
+        {% endif %}
+
+        <div class="d-flex align-items-end gap-2" style="max-width:800px;">
+            <div>
+                <label class="form-label text-muted" style="font-size:0.85em;">New team (without @)</label>
+                <input id="new-team-name" type="text" class="form-control form-control-sm"
+                       placeholder="e.g. eic-ops" style="width:220px;">
+            </div>
+            <button id="new-team-btn" class="btn btn-sm btn-primary">Create team</button>
+            <span id="new-team-msg" class="text-muted" style="font-size:0.85em;"></span>
+        </div>
+        <script>
+        document.getElementById('new-team-btn').addEventListener('click', function() {
+            var nm = document.getElementById('new-team-name').value.trim();
+            var msg = document.getElementById('new-team-msg');
+            if (!nm) { msg.textContent = 'name required'; return; }
+            msg.textContent = 'creating…';
+            fetch("{% url 'monitor_app:team_create' %}", {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ name: nm }),
+            }).then(function(r) { return r.json().then(function(j){ return {ok: r.ok, j: j}; }); })
+              .then(function(o) {
+                if (!o.ok) { msg.textContent = o.j.error || 'error'; return; }
+                window.location = o.j.edit_url;
+              })
+              .catch(function(e) { msg.textContent = 'error: ' + e.message; });
+        });
+        </script>
+    </section>
+
     {# ─── Top summary table ─── #}
     <form method="get" class="d-flex align-items-center gap-2 mb-2">
         <label class="text-muted">Window:</label>

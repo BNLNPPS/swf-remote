@@ -171,6 +171,10 @@ from .alarm_views import (  # noqa: E402
     alarm_config_edit,
     alarm_config_save,
     alarm_config_version,
+    team_create,
+    team_edit,
+    team_save,
+    team_version,
 )
 
 
