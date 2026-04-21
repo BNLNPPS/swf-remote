@@ -11,6 +11,7 @@ CONTEXT_NAME = 'swf-alarms'
 
 ALARM_CONFIGS = [
     {
+        'title': "PanDA task failure rate — Sakib's tasks",
         'data': {
             'entry_id': 'alarm_panda_failure_rate_sakib',
             'kind': 'task_failure_rate',
@@ -33,6 +34,7 @@ ALARM_CONFIGS = [
         ),
     },
     {
+        'title': 'PanDA task failure rate — all EIC tasks (catch-all)',
         'data': {
             'entry_id': 'alarm_panda_failure_rate_eic_all',
             'kind': 'task_failure_rate',
@@ -76,6 +78,7 @@ def seed(apps, schema_editor):
             continue
         Entry.objects.create(
             id=str(uuid.uuid4()),
+            title=cfg['title'],
             content=cfg['content'],
             kind='alarm',
             context=ctx,

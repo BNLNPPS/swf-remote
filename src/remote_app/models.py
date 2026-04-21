@@ -60,12 +60,17 @@ class Entry(models.Model):
 
     id = models.CharField(max_length=36, primary_key=True,
                           default=_new_entry_id)
+    # Human-readable title. swf-remote Entries don't follow tjai's
+    # "first line of content is the title" convention — alarms, events,
+    # engine runs need an explicit title. Optional; blank is fine for
+    # kinds that don't care.
+    title = models.CharField(max_length=255, blank=True, default='')
     content = models.TextField(blank=True, default='')
     kind = models.CharField(max_length=50)
     context = models.ForeignKey(EntryContext, on_delete=models.PROTECT,
                                 null=True, blank=True, related_name='entries')
-    # `name` is the tjai @-style unique identifier within a context. Not used
-    # by alarms but kept so the table is tjai-compatible for future kinds.
+    # `name` is the tjai @-style unique identifier within a context. Kept
+    # for tjai symmetry; not used by alarms.
     name = models.CharField(max_length=255, null=True, blank=True)
     data = models.JSONField(null=True, blank=True)
     priority = models.IntegerField(null=True, blank=True)
@@ -115,6 +120,7 @@ class EntryVersion(models.Model):
     entry = models.ForeignKey(Entry, on_delete=models.CASCADE,
                               related_name='versions')
     version_num = models.IntegerField()
+    title = models.CharField(max_length=255, blank=True, default='')
     content = models.TextField(blank=True, default='')
     data = models.JSONField(null=True, blank=True)
     changed_by = models.CharField(max_length=100, default='unknown')

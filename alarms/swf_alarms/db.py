@@ -143,11 +143,11 @@ def create_event(conn, *, alarm_entry_id: str, dedupe_key: str,
     with conn.cursor() as cur:
         cur.execute(
             """INSERT INTO entry
-               (id, content, kind, context_id, data, status,
+               (id, title, content, kind, context_id, data, status,
                 timestamp_created, timestamp_modified)
-               VALUES (%s, %s, 'event', %s, %s::jsonb, 'active', %s, %s)""",
-            (new_id, body, CONTEXT_NAME, json.dumps(data, default=str),
-             now, now),
+               VALUES (%s, %s, %s, 'event', %s, %s::jsonb, 'active', %s, %s)""",
+            (new_id, subject[:255], body, CONTEXT_NAME,
+             json.dumps(data, default=str), now, now),
         )
     return new_id
 
@@ -184,14 +184,15 @@ def start_engine_run(conn) -> str:
     """Create a kind='engine_run' entry with started_at; return its UUID."""
     now = now_ts()
     uid = new_uuid()
+    title = f"Engine run {datetime.fromtimestamp(now, tz=timezone.utc).strftime('%Y%m%d %H:%M:%S UTC')}"
     data = {'entry_id': f'run_{int(now)}', 'started_at': now}
     with conn.cursor() as cur:
         cur.execute(
             """INSERT INTO entry
-               (id, content, kind, context_id, data, status,
+               (id, title, content, kind, context_id, data, status,
                 timestamp_created, timestamp_modified)
-               VALUES (%s, '', 'engine_run', %s, %s::jsonb, 'active', %s, %s)""",
-            (uid, CONTEXT_NAME, json.dumps(data), now, now),
+               VALUES (%s, %s, '', 'engine_run', %s, %s::jsonb, 'active', %s, %s)""",
+            (uid, title, CONTEXT_NAME, json.dumps(data), now, now),
         )
     return uid
 

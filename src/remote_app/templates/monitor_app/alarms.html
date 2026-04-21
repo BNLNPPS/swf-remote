@@ -44,6 +44,7 @@
         <thead>
             <tr>
                 <th>Alarm</th>
+                <th>Title</th>
                 <th>Severity</th>
                 <th>Enabled</th>
                 <th>Fires in last {{ hours }}h</th>
@@ -55,6 +56,7 @@
             {% for r in summary_rows %}
             <tr>
                 <td><a href="#section-{{ r.entry_id }}"><code>{{ r.name }}</code></a></td>
+                <td>{{ r.title|default:'' }}</td>
                 <td class="{{ r.severity|state_class }}">{{ r.severity }}</td>
                 <td class="{% if r.enabled %}ok_fill{% else %}paused_fill{% endif %}">
                     {% if r.enabled %}on{% else %}off{% endif %}
@@ -64,7 +66,7 @@
                 <td>{{ r.last_fired|fmt_dt|default:'—' }}</td>
             </tr>
             {% empty %}
-            <tr><td colspan="6" class="text-muted">No alarm configs defined.</td></tr>
+            <tr><td colspan="7" class="text-muted">No alarm configs defined.</td></tr>
             {% endfor %}
         </tbody>
     </table>
@@ -73,16 +75,21 @@
     {% for sec in sections %}
     <section id="section-{{ sec.config.entry_id }}" class="mt-5">
         <div class="d-flex justify-content-between align-items-start">
-            <h3 style="font-size: 1.3em;">
-                <code>{{ sec.config.name }}</code>
-                <span class="ms-2 {{ sec.config.severity|state_class }}"
-                      style="font-size: 0.6em; padding: 2px 10px; border-radius:3px;">
-                  {{ sec.config.severity }}
-                </span>
-                {% if not sec.config.enabled %}
-                  <span class="paused_fill ms-1" style="font-size:0.6em; padding: 2px 10px; border-radius:3px;">disabled</span>
-                {% endif %}
-            </h3>
+            <div>
+                <h3 style="font-size: 1.3em; margin-bottom: 0.15em;">
+                    {{ sec.config.title|default:sec.config.name }}
+                    <span class="ms-2 {{ sec.config.severity|state_class }}"
+                          style="font-size: 0.55em; padding: 2px 10px; border-radius:3px;">
+                      {{ sec.config.severity }}
+                    </span>
+                    {% if not sec.config.enabled %}
+                      <span class="paused_fill ms-1" style="font-size:0.55em; padding: 2px 10px; border-radius:3px;">disabled</span>
+                    {% endif %}
+                </h3>
+                <div class="text-muted" style="font-size: 0.9em;">
+                    <code>{{ sec.config.entry_id }}</code>
+                </div>
+            </div>
             <a class="btn btn-sm btn-outline-primary"
                href="{% url 'monitor_app:alarm_config_edit' entry_id=sec.config.entry_id %}">Edit</a>
         </div>

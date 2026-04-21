@@ -57,8 +57,9 @@ def snapshot_on_change(sender, instance: Entry, **kwargs):
         return
 
     content_changed = prev.content != instance.content
+    title_changed = prev.title != instance.title
     data_changed = _data_substantive(prev.data, instance.data)
-    if not (content_changed or data_changed):
+    if not (content_changed or title_changed or data_changed):
         return
 
     last = (EntryVersion.objects
@@ -70,6 +71,7 @@ def snapshot_on_change(sender, instance: Entry, **kwargs):
     EntryVersion.objects.create(
         entry=prev,
         version_num=next_num,
+        title=prev.title,
         content=prev.content,
         data=prev.data,
         changed_by=get_changed_by(),

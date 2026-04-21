@@ -29,6 +29,7 @@ def alarm_configs() -> list[dict]:
             'id': e.id,
             'entry_id': data.get('entry_id', ''),
             'name': data.get('entry_id', '').replace('alarm_', '', 1) or e.id[:8],
+            'title': e.title,
             'content': e.content,
             'kind': data.get('kind', ''),
             'enabled': bool(data.get('enabled', True)),
@@ -116,11 +117,12 @@ def versions_for(entry_uuid: str, limit: int = 50) -> list[dict]:
     return [{
         'id': v.id,
         'version_num': v.version_num,
+        'title': v.title,
         'content': v.content,
         'data': v.data,
         'changed_by': v.changed_by,
         'timestamp': v.timestamp,
-        'preview': (v.content or '').splitlines()[0][:120] if v.content else '',
+        'preview': v.title or ((v.content or '').splitlines()[0][:120] if v.content else ''),
         'line_count': (v.content or '').count('\n') + (1 if (v.content or '') else 0),
     } for v in qs]
 
@@ -185,6 +187,7 @@ def _event_to_dict(e: Entry) -> dict:
     clear_time = data.get('clear_time')
     return {
         'id': e.id,
+        'title': e.title,
         'entry_id': data.get('entry_id'),
         'subject': data.get('subject', ''),
         'dedupe_key': data.get('dedupe_key'),

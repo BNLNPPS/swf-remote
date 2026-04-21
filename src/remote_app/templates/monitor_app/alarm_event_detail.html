@@ -8,7 +8,12 @@
 <link rel="stylesheet" href="{% static 'css/state-colors.css' %}">
 <div class="container mt-3" style="max-width: 1100px;">
     <p><a href="{% url 'monitor_app:alarms_dashboard' %}">&larr; All alarms</a></p>
-    <h2 class="mb-3">{{ event.subject }}</h2>
+    <h2 class="mb-1">{{ event.title|default:event.subject }}</h2>
+    {% if event.title and event.subject and event.title != event.subject %}
+    <div class="text-muted mb-3">{{ event.subject }}</div>
+    {% else %}
+    <div class="mb-3"></div>
+    {% endif %}
 
     <table class="table table-sm mb-3" style="max-width:900px;">
         <tbody>

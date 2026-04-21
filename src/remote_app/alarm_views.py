@@ -55,6 +55,7 @@ def alarms_dashboard(request):
         summary_rows.append({
             'entry_id': eid,
             'name': cfg['name'],
+            'title': cfg.get('title', ''),
             'severity': cfg['severity'],
             'enabled': cfg['enabled'],
             'count': count,
@@ -109,6 +110,7 @@ def alarm_config_edit(request, entry_id: str):
     return render(request, 'monitor_app/alarm_config_edit.html', {
         'alarm': alarm,
         'alarm_entry_id': entry_id,
+        'title': alarm.title or '',
         'content': alarm.content or '',
         'line_count': (alarm.content or '').count('\n') + 1,
         'data_json': json.dumps({
@@ -143,9 +145,12 @@ def alarm_config_save(request, entry_id: str):
         return JsonResponse({'error': f'bad json: {e}'}, status=400)
 
     new_content = payload.get('content')
+    new_title = payload.get('title')
     new_partial = payload.get('data') or {}
     if new_content is None:
         new_content = alarm.content
+    if new_title is None:
+        new_title = alarm.title
 
     # Merge partial edits onto existing data, preserving entry_id.
     existing_data = dict(alarm.data or {})
@@ -160,6 +165,7 @@ def alarm_config_save(request, entry_id: str):
         changed_by = f"{changed_by}:{request.user.username}"
     set_changed_by(changed_by)
 
+    alarm.title = new_title
     alarm.content = new_content
     alarm.data = existing_data
     alarm.timestamp_modified = time.time()
@@ -186,6 +192,7 @@ def alarm_config_version(request, entry_id: str, version_num: int):
         return JsonResponse({'error': 'version not found'}, status=404)
     return JsonResponse({
         'version_num': v.version_num,
+        'title': v.title,
         'content': v.content,
         'data': v.data,
         'changed_by': v.changed_by,
