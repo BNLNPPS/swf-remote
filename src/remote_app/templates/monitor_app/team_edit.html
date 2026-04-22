@@ -26,12 +26,26 @@
 
 <div class="container mt-3" style="max-width: 1000px;">
     <p><a href="{% url 'monitor_app:alarms_dashboard' %}">&larr; All alarms</a></p>
-    <h2 class="mb-3">Team <code>{{ team_name }}</code></h2>
+    {% if create_mode %}
+      <h2 class="mb-3">New team</h2>
+    {% else %}
+      <h2 class="mb-3">Team <code>{{ team_name }}</code></h2>
+    {% endif %}
 
     <div class="d-flex align-items-center mb-2">
-        <button id="save-btn" class="btn btn-sm btn-primary">Save</button>
-        <span id="autosave-indicator" class="autosave-indicator">Idle</span>
+        <button id="save-btn" class="btn btn-sm btn-secondary" disabled>Save</button>
+        <span id="autosave-indicator" class="autosave-indicator"></span>
     </div>
+
+    {% if create_mode %}
+    <h3 style="font-size:1em;" class="mt-3">Name</h3>
+    <p class="text-muted" style="font-size:0.85em;">
+      Short slug used as <code>@&lt;name&gt;</code> in alarm recipient
+      lists. No leading <code>@</code> — it's added automatically.
+    </p>
+    <input type="text" id="name-input" class="form-control"
+           maxlength="255" placeholder="e.g. eic-ops">
+    {% endif %}
 
     <h3 style="font-size:1em;" class="mt-3">Title</h3>
     <input type="text" id="title-input" class="form-control" value="{{ title }}"
@@ -48,6 +62,58 @@
     <div id="version-history" class="mt-4"></div>
 </div>
 
+{% if create_mode %}
+<script>
+(function() {
+    var CREATE_URL = "{% url 'monitor_app:team_create' %}";
+    var nameInput = document.getElementById('name-input');
+    var titleInput = document.getElementById('title-input');
+    var cmContent = CodeMirror.fromTextArea(document.getElementById('editor'), {
+        mode: null, theme: 'material-darker', lineNumbers: true,
+        lineWrapping: true, tabSize: 2,
+    });
+    var indicator = document.getElementById('autosave-indicator');
+    var saveBtn = document.getElementById('save-btn');
+    indicator.textContent = 'Enter a name and save to create.';
+
+    function updateSaveState() {
+        var dirty = nameInput.value.trim().length > 0;
+        saveBtn.disabled = !dirty;
+        saveBtn.className = 'btn btn-sm ' + (dirty ? 'btn-primary' : 'btn-secondary');
+    }
+    nameInput.addEventListener('input', updateSaveState);
+    updateSaveState();
+
+    saveBtn.addEventListener('click', function() {
+        var nm = nameInput.value.trim();
+        if (!nm) { indicator.textContent = 'name required'; return; }
+        indicator.className = 'autosave-indicator saving';
+        indicator.textContent = 'Creating…';
+        fetch(CREATE_URL, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({
+                name: nm,
+                title: titleInput.value,
+                content: cmContent.getValue(),
+            }),
+        }).then(function(r) { return r.json().then(function(j){ return {ok: r.ok, j: j}; }); })
+          .then(function(o) {
+            if (!o.ok) {
+                indicator.className = 'autosave-indicator error';
+                indicator.textContent = 'Error: ' + (o.j.error || 'create failed');
+                return;
+            }
+            window.location = o.j.edit_url;
+          })
+          .catch(function(e) {
+            indicator.className = 'autosave-indicator error';
+            indicator.textContent = 'Error: ' + e.message;
+          });
+    });
+})();
+</script>
+{% else %}
 <script>
 (function() {
     var AT_NAME    = "{{ team_name|escapejs }}";
@@ -74,6 +140,22 @@
         indicator.textContent = text;
     }
 
+    var saveBtn = document.getElementById('save-btn');
+    function isDirty() {
+        return titleInput.value !== lastTitle || cmContent.getValue() !== lastContent;
+    }
+    function updateSaveState() {
+        if (isDirty()) {
+            saveBtn.classList.remove('btn-secondary');
+            saveBtn.classList.add('btn-primary');
+            saveBtn.disabled = false;
+        } else {
+            saveBtn.classList.remove('btn-primary');
+            saveBtn.classList.add('btn-secondary');
+            saveBtn.disabled = true;
+        }
+    }
+
     function save(isAutosave) {
         var titleVal = titleInput.value;
         var contentVal = cmContent.getValue();
@@ -97,6 +179,7 @@
             setIndicator('saved', (isAutosave ? 'Autosaved' : 'Saved') +
                 ' — v' + (j.version_num || 0) +
                 ' at ' + new Date((j.modified || 0) * 1000).toLocaleTimeString());
+            updateSaveState();
         }).catch(function(e) {
             setIndicator('error', 'Save failed: ' + e.message);
         });
@@ -114,8 +197,10 @@
             }));
         } catch (e) {}
     }
-    cmContent.on('change', backup);
-    titleInput.addEventListener('input', backup);
+    function onChange() { backup(); updateSaveState(); }
+    cmContent.on('change', onChange);
+    titleInput.addEventListener('input', onChange);
+    updateSaveState();
 
     window.addEventListener('beforeunload', function() {
         if (titleInput.value === lastTitle && cmContent.getValue() === lastContent) return;
@@ -167,6 +252,7 @@
                 titleInput.value = j.title || '';
                 cmContent.setValue(j.content || '');
                 setIndicator('saved', 'v' + n + ' loaded — edit and save to commit.');
+                updateSaveState();
             })
             .catch(function(e) { setIndicator('error', 'Restore failed: ' + e.message); });
     };
@@ -178,8 +264,10 @@
             titleInput.value = lo.title || '';
             cmContent.setValue(lo.content || '');
             setIndicator('saved', 'Local backup restored — save to commit.');
+            updateSaveState();
         } catch (e) { setIndicator('error', 'Restore failed: ' + e.message); }
     };
 })();
 </script>
+{% endif %}
 {% endblock %}

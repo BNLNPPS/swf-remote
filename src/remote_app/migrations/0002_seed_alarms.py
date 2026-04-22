@@ -14,46 +14,45 @@ ALARM_CONFIGS = [
         'title': "PanDA task failure rate — Sakib's tasks",
         'data': {
             'entry_id': 'alarm_panda_failure_rate_sakib',
-            'kind': 'task_failure_rate',
             'enabled': True,
             'severity': 'warning',
             'recipients': ['srahman1@bnl.gov', 'wenaus@gmail.com'],
             'renotification_window_hours': 24,
             'params': {
                 'threshold': 0.03,
-                'days_window': 1,
-                'workinggroup': 'EIC',
+                'since_days': 1,
                 'username': 'Sakib Rahman',
                 'min_terminal_jobs': 5,
             },
         },
         'content': (
-            "Alert on PanDA tasks owned by Sakib Rahman (EIC working group) "
-            "whose computed failure rate exceeds 3% over the last day.\n"
+            "Alert on PanDA tasks owned by Sakib Rahman whose computed "
+            "failure rate exceeds the configured threshold over the "
+            "configured window. Threshold, window, and minimum terminal "
+            "jobs are in the Check params below.\n"
             "\n"
             "Dashboard: https://epic-devcloud.org/prod/alarms/\n"
         ),
     },
     {
-        'title': 'PanDA task failure rate — all EIC tasks (catch-all)',
+        'title': 'PanDA task failure rate — catch-all',
         'data': {
             'entry_id': 'alarm_panda_failure_rate_eic_all',
-            'kind': 'task_failure_rate',
             'enabled': True,
             'severity': 'info',
             'recipients': ['wenaus@gmail.com'],
             'renotification_window_hours': 48,
             'params': {
                 'threshold': 0.05,
-                'days_window': 1,
-                'workinggroup': 'EIC',
+                'since_days': 1,
                 'min_terminal_jobs': 5,
             },
         },
         'content': (
-            "Catch-all alert on any EIC PanDA task whose computed failure "
-            "rate exceeds 5% over the last day. Torre-only tuning channel "
-            "for shaping future per-owner alarms.\n"
+            "Catch-all alert on any PanDA task whose computed failure rate "
+            "exceeds the configured threshold over the configured window. "
+            "Torre-only tuning channel for shaping future per-owner "
+            "alarms. Threshold and window live in the Check params below.\n"
         ),
     },
 ]

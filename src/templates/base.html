@@ -24,7 +24,19 @@
       .dropdown-content a { color: #000; padding: 10px 14px; display: block; }
       .dropdown-content a:hover { background: #f1f1f1; }
       .dropdown:hover .dropdown-content { display: block; }
+
+      /* PCS canonical Edit button — filled dark green, matches swf-monitor. */
+      .btn.btn-dark-green {
+        background-color: #166534; border-color: #166534; color: #fff;
+      }
+      .btn.btn-dark-green:hover, .btn.btn-dark-green:focus {
+        background-color: #14532d; border-color: #14532d; color: #fff;
+      }
+      .btn.btn-dark-green:disabled, .btn.btn-dark-green.disabled {
+        background-color: #6c757d; border-color: #6c757d; color: #e9ecef;
+      }
     </style>
+    {% block extra_head %}{% endblock %}
 </head>
 <body>
     <nav>

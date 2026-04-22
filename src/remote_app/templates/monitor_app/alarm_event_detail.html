@@ -19,14 +19,10 @@
         <tbody>
             <tr><th style="width:200px;">entry_id</th>
                 <td><code>{{ event.entry_id }}</code></td></tr>
-            <tr><th>Dedupe key</th>
-                <td><code>{{ event.dedupe_key }}</code></td></tr>
             <tr><th>State</th>
                 <td class="{% if event.state == 'active' %}failed_fill{% else %}paused_fill{% endif %}">
                     {{ event.state }}
                 </td></tr>
-            <tr><th>Severity</th>
-                <td class="{{ event.severity|state_class }}">{{ event.severity }}</td></tr>
             <tr><th>Fire time</th><td>{{ event.fire_time|fmt_dt }}</td></tr>
             <tr><th>Clear time</th><td>{{ event.clear_time|fmt_dt|default:'— (still active)' }}</td></tr>
             <tr><th>Last seen</th><td>{{ event.last_seen|fmt_dt }}</td></tr>
@@ -46,7 +42,7 @@
         <div class="card-body">
             <table class="table table-sm mb-0">
                 <tbody>
-                {% for k, v in event.data.items %}
+                {% for k, v in event.context_data.items %}
                     <tr>
                         <th style="width: 260px;"><code>{{ k }}</code></th>
                         {% if k == 'status' %}

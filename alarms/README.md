@@ -1,21 +1,21 @@
 # swf-alarms
 
 Standalone polling alarm engine for the swf ecosystem (PanDA, streaming
-workflow). Zero Django coupling — reads PanDA data via REST (through
+workflow). Zero Django coupling — pulls PanDA data via REST (through
 swf-remote's proxy, which owns the SSH tunnel to pandaserver02), persists
-state in sqlite, sends email via AWS SES. The swf-remote Django app serves
-a read-only dashboard that reads the same sqlite file.
+state in swf-remote's Postgres (same DB as the Django dashboard), sends
+email via AWS SES.
+
+Full system overview: see `../docs/alarms.md`. This README is the
+engine-developer entry point.
 
 ## Why standalone
 
-- The engine can run on any host with network access to swf-remote — no
-  Django bootstrap, no project PYTHONPATH shenanigans, no management command.
-- Lightweight deps (`httpx`, `boto3`) mean the venv is small and portable.
-- The swf-remote Django side only *reads* alarm state to render a dashboard.
-  It doesn't run checks, own the data, or import engine code.
-- Extending the channel mix (Mattermost, Telegram, PagerDuty) = drop a
-  function into `swf_alarms/notify.py` and wire it in `run.py`. No Django
-  restart.
+- Runs on any host with network access to swf-remote — no Django
+  bootstrap, no project PYTHONPATH, no management command.
+- Lightweight deps (`httpx`, `boto3`, `psycopg`) mean a small, portable
+  venv.
+- The Django side only *reads* alarm state to render dashboards.
 
 ## Install
 
@@ -24,16 +24,14 @@ cd /home/admin/github/swf-remote/alarms
 bash deploy/install.sh
 ```
 
-This creates `.venv/`, copies `config.toml.example` → `config.toml` if absent,
-creates `/var/lib/swf-alarms/` and `/var/log/swf-alarms/` with the right
-group perms for the Django dashboard to read, and initialises the sqlite
-state DB.
+Creates `.venv/`, copies `config.toml.example` → `config.toml` if absent.
 
-Edit `config.toml` (SES region, recipients, thresholds) before the first live run.
+Edit `config.toml` (SES region, from address, DB DSN) before the first
+live run.
 
 ## Run
 
-Dry-run (no emails):
+Dry-run (writes state, suppresses email):
 
 ```bash
 .venv/bin/swf-alarms-run --config config.toml --dry-run -v
@@ -47,48 +45,75 @@ For real:
 
 ## Schedule
 
-See `deploy/crontab.example` — every 5 minutes is the default.
+See `deploy/crontab.example`. Every 5 minutes is the default cadence.
 
 ## Data source
 
 The engine hits `https://epic-devcloud.org/prod/api/panda/tasks/` —
-swf-remote's transparent proxy onto swf-monitor at BNL. Adding new panels
-of PanDA data (queues, jobs, errors) is a question of (a) swf-monitor
-exposing another REST endpoint and (b) swf-remote routing it through the
-existing `panda_api_proxy` catch-all. No engine change.
+swf-remote's transparent proxy onto swf-monitor at BNL. Adding new
+panels of PanDA data (queues, jobs, errors) is a question of (a)
+swf-monitor exposing another REST endpoint and (b) swf-remote routing
+it through the existing `panda_api_proxy` catch-all. No engine change
+required.
 
-## Adding a new check
+## Adding a new alarm
 
-1. Drop `swf_alarms/checks/your_check.py` with a `def your_check(client, params)`
-   generator yielding `Alarm(...)` objects.
-2. Register it in `swf_alarms/checks/__init__.py` by adding the entry to
-   `REGISTRY`.
-3. Add a `[[checks]]` block to `config.toml` with `kind = "your_check"`.
+See `../docs/alarms.md` § "Adding a new alarm" for the full mechanism.
+Summary:
 
-Checks must not send notifications, must not raise on transient failures,
-and should scope `dedupe_key` to the entity they alarm on (task id, queue
-name, etc.) so cooldown works naturally.
+1. Drop `swf_alarms/alarms/<name>.py` exposing a `PARAMS` dict and
+   `def detect(client, params)`, yielding `Detection(...)` objects.
+2. Share math via `swf_alarms/lib/*` — no central registry.
+3. Create an `Entry` row (kind='alarm', context='swf-alarms',
+   data.entry_id matching the module name) via data migration or
+   Django shell.
+4. Next cron tick picks it up automatically.
+
+The contract: `detect` must not email, must not raise on transient
+fetch failures (log + yield nothing), and must set a stable
+`dedupe_key` per entity so state-based dedup works.
 
 ## Adding a new channel
 
-Add a `send_<channel>(alarm, **cfg) -> bool` function in `notify.py`. Wire
-it into `run.py`'s `_persist_and_maybe_notify` with a `channels = [...]`
-config knob on each check (or a global default). Failures must return
+Add `send_<channel>(alarm, **cfg) -> bool` in `notify.py`. Wire into
+`run.py` behind a `channels = [...]` config knob. Failures must return
 False (not raise) so one stuck channel can't cascade.
 
-## Dedup and cooldown
+## "Disabled" (per-alarm) semantics
 
-- **Dedup key** = `(check_name, dedupe_key)`. First time seen: insert,
-  fire. Subsequent runs: update `last_seen_at`; notify only when cooldown
-  has expired.
-- **Cooldown** is config (`cooldown_hours`). 24h default. Resets only on
-  successful notification.
-- **No auto-clear** yet — an alarm stays `active` until either the engine
-  re-notifies (after cooldown) or someone marks it cleared in the dashboard.
-  Time-based auto-clear ("not seen in N runs") is a future addition.
+Each alarm's `data.enabled` flag controls **only the email side**. When
+False:
+
+- The algorithm still runs every tick.
+- Event rows are still created, and active/clear still ticks.
+- The dashboard still shows everything.
+- **No SES call is made.** `last_notified` is not updated.
+
+When True, the engine additionally sends email on new detections and on
+renotification. "Stop the algorithm entirely" is `archived=True`, not
+`enabled=False`. There is no global email switch — per-alarm is the
+only control.
+
+## Dedup and renotification
+
+- **State-based dedup.** One active `event` row per `(alarm, entity)`.
+  While active, the engine bumps `data.last_seen` without re-emailing.
+- **Auto-clear.** On a successful tick where the entity is no longer
+  in the detection set, the event's `data.clear_time` is set to now.
+  A transient fetch failure does NOT auto-clear — last-known state is
+  preserved.
+- **One email per alarm per tick.** Every detection that would warrant
+  a send this tick (new events, plus events whose renotification
+  window has elapsed, plus events created while emails were off) is
+  bundled into a single SES email. No more one-email-per-task.
+- **Renotification window.** Per-alarm `data.renotification_window_hours`.
+  Governs when a still-firing event is eligible to be re-included in
+  the next bundle. 0 / missing = one email per event lifecycle (the
+  event is bundled once when new, never renotified until it clears and
+  re-fires).
 
 ## Dashboard
 
-Served by swf-remote Django at `/prod/alarms/`. Read-only sqlite read —
-no Django model, no migration. Template lives in
-`src/remote_app/templates/monitor_app/alarms.html`.
+Served by swf-remote Django at `/prod/alarms/`. Reads from the same
+Postgres `entry` table the engine writes. See
+`../src/remote_app/alarm_views.py`.

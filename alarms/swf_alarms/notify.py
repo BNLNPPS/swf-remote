@@ -19,9 +19,8 @@ log = logging.getLogger(__name__)
 
 @dataclass
 class Alarm:
-    check_name: str
+    alarm_name: str
     dedupe_key: str
-    severity: str
     subject: str
     body: str
     recipients: list[str]

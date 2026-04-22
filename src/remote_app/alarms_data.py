@@ -3,6 +3,7 @@ tables. No model logic beyond what the views need.
 """
 from __future__ import annotations
 
+import json
 import time
 from datetime import datetime, timezone, timedelta
 
@@ -32,16 +33,28 @@ def alarm_configs() -> list[dict]:
             'name': data.get('entry_id', '').replace('alarm_', '', 1) or e.id[:8],
             'title': e.title,
             'content': e.content,
-            'kind': data.get('kind', ''),
             'enabled': bool(data.get('enabled', True)),
-            'severity': data.get('severity', 'warning'),
-            'recipients': list(data.get('recipients') or []),
+            # Render recipients as a plain string for display. Storage
+            # may be str (new-style, user-typed, preserved) or list[str]
+            # (legacy seed rows). NEVER `list(x)` on an unknown-typed x —
+            # that iterates characters when x is already a string.
+            'recipients_text': _recipients_display(data.get('recipients')),
             'params': dict(data.get('params') or {}),
             'created': e.timestamp_created,
             'modified': e.timestamp_modified,
             'data': data,
         })
     return out
+
+
+def _recipients_display(value) -> str:
+    if value is None or value == '':
+        return ''
+    if isinstance(value, str):
+        return value
+    if isinstance(value, (list, tuple)):
+        return ', '.join(str(v) for v in value)
+    return str(value)
 
 
 def get_alarm_config_by_entry_id(entry_id: str) -> Entry | None:
@@ -55,8 +68,8 @@ def get_alarm_config_by_entry_id(entry_id: str) -> Entry | None:
         return None
 
 
-def events_in_window(alarm_entry_id: str, hours: int, limit: int = 500) -> list[dict]:
-    """Event entries whose fire_time is within the last N hours.
+def events_since(alarm_entry_id: str, hours: int, limit: int = 500) -> list[dict]:
+    """Event entries with fire_time within the last N hours.
 
     Returns dicts with useful denormalised fields for the template.
     """
@@ -71,7 +84,7 @@ def events_in_window(alarm_entry_id: str, hours: int, limit: int = 500) -> list[
     return [_event_to_dict(e) for e in qs]
 
 
-def count_events_in_window(alarm_entry_id: str, hours: int) -> int:
+def count_events_since(alarm_entry_id: str, hours: int) -> int:
     event_entry_id = _event_entry_id_for(alarm_entry_id)
     cutoff = time.time() - hours * 3600
     return (Entry.objects
@@ -82,24 +95,178 @@ def count_events_in_window(alarm_entry_id: str, hours: int) -> int:
             .count())
 
 
-def active_event_count(alarm_entry_id: str) -> int:
+def _active_events_qs(alarm_entry_id: str):
+    """All non-archived event rows for this alarm, filtered in Python for
+    JSON-null clear_time (Django's __isnull on JSON paths only catches
+    missing keys, not ``null``-valued ones)."""
     event_entry_id = _event_entry_id_for(alarm_entry_id)
-    return (Entry.objects
+    rows = (Entry.objects
             .filter(context_id=CONTEXT_NAME, kind='event',
                     data__entry_id=event_entry_id,
-                    archived=False, deleted_at__isnull=True,
-                    data__clear_time__isnull=True)
-            .count())
+                    archived=False, deleted_at__isnull=True)
+            .order_by('-timestamp_created'))
+    return [e for e in rows if (e.data or {}).get('clear_time') is None]
+
+
+def active_event_count(alarm_entry_id: str) -> int:
+    return len(_active_events_qs(alarm_entry_id))
+
+
+def active_event_rows(alarm_entry_id: str) -> list:
+    """Raw Entry objects for currently-active events of this alarm."""
+    return _active_events_qs(alarm_entry_id)
+
+
+def active_events(alarm_entry_id: str) -> list[dict]:
+    """Present-state view: one row per currently-active event for this alarm."""
+    out: list[dict] = []
+    for e in _active_events_qs(alarm_entry_id):
+        d = e.data or {}
+        ft = d.get('fire_time')
+        out.append({
+            'id': e.id,
+            'subject': d.get('subject') or e.title or '?',
+            'dedupe_key': d.get('dedupe_key') or '',
+            'fire_time': ft,
+            'fire_time_dt': _ts_to_dt(ft),
+            'last_seen': d.get('last_seen'),
+            'metric': _event_metric(d),
+        })
+    return out
+
+
+def _event_metric(data: dict) -> str:
+    """Trigger metric as a display string.
+
+    Preferred: detection set an explicit `metric` key (formatted string).
+    Fallback: derive from `computed_failurerate` for old rows that
+    predate the metric field.
+    """
+    m = data.get('metric')
+    if isinstance(m, str) and m:
+        return m
+    cfr = data.get('computed_failurerate')
+    if isinstance(cfr, (int, float)):
+        return f"{cfr*100:.1f}%"
+    return ''
+
+
+def _ts_to_dt(ts):
+    if ts is None or ts == '':
+        return None
+    try:
+        return datetime.fromtimestamp(float(ts), tz=timezone.utc)
+    except (TypeError, ValueError, OSError, OverflowError):
+        return None
+
+
+def events_for_task(alarm_entry_id: str, dedupe_key: str,
+                    hours: int) -> list[dict]:
+    """All events for one (alarm, entity) in the last N hours, reverse chron."""
+    event_entry_id = _event_entry_id_for(alarm_entry_id)
+    cutoff = time.time() - hours * 3600
+    qs = (Entry.objects
+          .filter(context_id=CONTEXT_NAME, kind='event',
+                  data__entry_id=event_entry_id,
+                  data__dedupe_key=dedupe_key,
+                  archived=False, deleted_at__isnull=True,
+                  timestamp_created__gte=cutoff)
+          .order_by('-timestamp_created'))
+    return [_event_to_dict(e) for e in qs]
+
+
+def task_history_bins(alarm_entry_id: str, dedupe_key: str,
+                      hours: int) -> list[dict]:
+    """One row per engine tick in the last N hours: state of this (alarm,
+    entity) at that tick.
+
+    state ∈ {'firing', 'clear', 'unknown'}:
+      - 'firing' — at that tick, an event for this task had fire_time
+        ≤ tick ≤ (clear_time or now), i.e. the alarm was active.
+      - 'clear' — the tick ran cleanly and the task was not firing.
+      - 'unknown' — the tick errored or didn't finish (no truth).
+    """
+    now = time.time()
+    cutoff = now - hours * 3600
+    event_entry_id = _event_entry_id_for(alarm_entry_id)
+
+    # All engine runs in window, oldest first.
+    runs = (Entry.objects
+            .filter(context_id=CONTEXT_NAME, kind='engine_run',
+                    deleted_at__isnull=True,
+                    timestamp_created__gte=cutoff)
+            .order_by('timestamp_created'))
+
+    # All events for this (alarm, entity) whose interval intersects the
+    # window. An event is a ∞ interval [fire_time, clear_time|now]; it
+    # intersects [cutoff, now] unless clear_time < cutoff.
+    evs = (Entry.objects
+           .filter(context_id=CONTEXT_NAME, kind='event',
+                   data__entry_id=event_entry_id,
+                   data__dedupe_key=dedupe_key,
+                   archived=False, deleted_at__isnull=True))
+    intervals: list[tuple[float, float]] = []
+    for e in evs:
+        d = e.data or {}
+        ft = float(d.get('fire_time') or 0)
+        ct = d.get('clear_time')
+        ct_f = float(ct) if ct is not None else now
+        if ct_f < cutoff:
+            continue
+        intervals.append((ft, ct_f))
+
+    bins: list[dict] = []
+    for run in runs:
+        rd = run.data or {}
+        tick = float(rd.get('started_at') or run.timestamp_created)
+        per_alarm = rd.get('per_alarm') or {}
+        pa = per_alarm.get(alarm_entry_id) or {}
+        errored = bool(pa.get('errors')) or (rd.get('finished_at') is None)
+        firing = any(ft <= tick <= ct for ft, ct in intervals)
+        if errored:
+            state = 'unknown'
+        elif firing:
+            state = 'firing'
+        else:
+            state = 'clear'
+        bins.append({
+            'tick': tick,
+            'state': state,
+            'run_id': run.id,
+        })
+    return bins
 
 
 def last_fired(alarm_entry_id: str):
+    """Most recent moment this alarm was observed firing.
+
+    For active events this is the tick's last_seen (bumped every tick).
+    For cleared events this is the clear_time. Taking the max across
+    all events gives "the last tick at which anything was firing" —
+    which for an alarm that's currently active is the most recent cron
+    tick.
+    """
     event_entry_id = _event_entry_id_for(alarm_entry_id)
-    row = (Entry.objects
-           .filter(context_id=CONTEXT_NAME, kind='event',
-                   data__entry_id=event_entry_id,
-                   archived=False, deleted_at__isnull=True)
-           .order_by('-timestamp_created').values('timestamp_created').first())
-    return row['timestamp_created'] if row else None
+    qs = (Entry.objects
+          .filter(context_id=CONTEXT_NAME, kind='event',
+                  data__entry_id=event_entry_id,
+                  archived=False, deleted_at__isnull=True))
+    best = 0.0
+    for e in qs:
+        d = e.data or {}
+        for k in ('last_seen', 'clear_time', 'fire_time'):
+            v = d.get(k)
+            if v is None:
+                continue
+            try:
+                fv = float(v)
+            except (TypeError, ValueError):
+                continue
+            if fv > best:
+                best = fv
+        if e.timestamp_created and e.timestamp_created > best:
+            best = float(e.timestamp_created)
+    return best if best > 0 else None
 
 
 def get_event(event_uuid: str) -> dict | None:
@@ -133,10 +300,54 @@ def recent_runs(limit: int = 20) -> list[dict]:
           .filter(context_id=CONTEXT_NAME, kind='engine_run',
                   archived=False, deleted_at__isnull=True)
           .order_by('-timestamp_created')[:limit])
-    return [{
-        'id': e.id,
-        'data': e.data or {},
-    } for e in qs]
+    out = []
+    for e in qs:
+        data = dict(e.data or {})
+        # Normalise legacy key names so templates read one shape.
+        if 'per_alarm' not in data and 'per_check' in data:
+            data['per_alarm'] = data['per_check']
+        if 'alarms_run' not in data and 'checks_run' in data:
+            data['alarms_run'] = data['checks_run']
+        out.append({'id': e.id, 'data': data})
+    return out
+
+
+def quiet_alarms(quiet_ticks: int = 3, history_ticks: int = 12) -> set[str]:
+    """Alarm entry_ids that look suspiciously silent.
+
+    An alarm is flagged quiet if:
+      - All of the last `quiet_ticks` successful engine runs (errors==0
+        for that alarm) saw zero detections for it, AND
+      - At least one run in the last `history_ticks` DID see detections
+        for it.
+
+    Purely heuristic. A broken alarm that returns nothing looks identical
+    to a healthy quiet alarm until it has prior non-zero history, so this
+    only catches recently-gone-silent cases. Good enough to surface.
+    """
+    recent = recent_runs(limit=history_ticks)
+    if len(recent) < quiet_ticks:
+        return set()
+    by_alarm_recent: dict[str, list[int]] = {}
+    by_alarm_history: dict[str, int] = {}
+    for i, r in enumerate(recent):
+        per = (r['data'].get('per_alarm') or {})
+        for eid, pc in per.items():
+            if (pc or {}).get('errors'):
+                continue  # errored run doesn't count toward quiet
+            seen = int((pc or {}).get('alarms_seen') or 0)
+            if i < quiet_ticks:
+                by_alarm_recent.setdefault(eid, []).append(seen)
+            by_alarm_history[eid] = by_alarm_history.get(eid, 0) + seen
+    out: set[str] = set()
+    for eid, recent_seens in by_alarm_recent.items():
+        if len(recent_seens) < quiet_ticks:
+            continue
+        if any(recent_seens):
+            continue
+        if by_alarm_history.get(eid, 0) > 0:
+            out.add(eid)
+    return out
 
 
 def engine_health() -> dict:
@@ -290,17 +501,26 @@ def _event_entry_id_for(alarm_entry_id: str) -> str:
     return 'event_' + alarm_entry_id
 
 
+_EVENT_INTERNAL_KEYS = {
+    'entry_id', 'fire_time', 'clear_time', 'last_seen', 'last_notified',
+    'dedupe_key', 'subject', 'recipients', 'alarm_config_id', 'severity',
+}
+
+
 def _event_to_dict(e: Entry) -> dict:
     data = e.data or {}
     fire_time = data.get('fire_time')
     clear_time = data.get('clear_time')
+    # Context data shown on the event-detail page: strip plumbing keys
+    # (these already have dedicated rows at the top of the page).
+    context_data = {k: v for k, v in data.items()
+                    if k not in _EVENT_INTERNAL_KEYS}
     return {
         'id': e.id,
         'title': e.title,
         'entry_id': data.get('entry_id'),
         'subject': data.get('subject', ''),
         'dedupe_key': data.get('dedupe_key'),
-        'severity': data.get('severity'),
         'fire_time': fire_time,
         'clear_time': clear_time,
         'last_seen': data.get('last_seen'),
@@ -308,6 +528,7 @@ def _event_to_dict(e: Entry) -> dict:
         'recipients': data.get('recipients') or [],
         'content': e.content,
         'data': data,
+        'context_data': context_data,
         'timestamp_created': e.timestamp_created,
         'timestamp_modified': e.timestamp_modified,
     }

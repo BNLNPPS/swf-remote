@@ -118,7 +118,7 @@ def active_events_for_alarm(conn, alarm_entry_id: str) -> list[dict]:
 
 
 def create_event(conn, *, alarm_entry_id: str, dedupe_key: str,
-                 severity: str, subject: str, body: str,
+                 subject: str, body: str,
                  recipients: list[str], extra_data: dict,
                  alarm_config_uuid: str) -> str:
     """Insert a new kind='event' entry with fire_time=now, clear_time=null.
@@ -134,15 +134,16 @@ def create_event(conn, *, alarm_entry_id: str, dedupe_key: str,
         'last_seen': now,
         'dedupe_key': dedupe_key,
         'subject': subject,
-        'severity': severity,
         'recipients': list(recipients),
         'alarm_config_id': alarm_config_uuid,
         **extra_data,
     }
-    # last_notified is set now because create_event always accompanies an
-    # initial notification attempt (or a dry-run skip). Engine re-notify
-    # logic compares (now - last_notified) against the per-alarm window.
-    data['last_notified'] = now
+    # `last_notified` is NOT set here. The engine bundles detections into
+    # one per-alarm email per tick; the bundle sender stamps
+    # `last_notified` on each included event only if the bundle send
+    # succeeds. Events created while the alarm is emails-off therefore
+    # have no `last_notified`, which means the next bundle (once emails
+    # are turned on) naturally sweeps them up.
     new_id = new_uuid()
     with conn.cursor() as cur:
         cur.execute(
@@ -265,19 +266,19 @@ def start_engine_run(conn) -> str:
     return uid
 
 
-def finish_engine_run(conn, run_uuid: str, *, checks_run: int,
+def finish_engine_run(conn, run_uuid: str, *, alarms_run: int,
                       alarms_seen: int, notifications_sent: int,
                       errors: int, error_details: str = '',
-                      per_check: dict | None = None) -> None:
+                      per_alarm: dict | None = None) -> None:
     now = now_ts()
     update = {
         'finished_at': now,
-        'checks_run': checks_run,
+        'alarms_run': alarms_run,
         'alarms_seen': alarms_seen,
         'notifications_sent': notifications_sent,
         'errors': errors,
         'error_details': error_details,
-        'per_check': per_check or {},
+        'per_alarm': per_alarm or {},
     }
     with conn.cursor() as cur:
         cur.execute(

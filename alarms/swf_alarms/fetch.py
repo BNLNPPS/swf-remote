@@ -34,11 +34,11 @@ class Client:
 
     def list_tasks(self, *, days: int = 1, status: str | None = None,
                    username: str | None = None, taskname: str | None = None,
-                   workinggroup: str | None = None, processingtype: str | None = None,
+                   processingtype: str | None = None,
                    limit: int = 50, before_id: int | None = None) -> dict:
         params = {"days": days, "limit": limit}
         for k, v in (("status", status), ("username", username),
-                     ("taskname", taskname), ("workinggroup", workinggroup),
+                     ("taskname", taskname),
                      ("processingtype", processingtype),
                      ("before_id", before_id)):
             if v is not None:
@@ -61,8 +61,5 @@ class Client:
     def get_task(self, jeditaskid: int) -> dict:
         return self._get(f"/api/panda/tasks/{jeditaskid}/")
 
-    def activity(self, *, days: int = 1, workinggroup: str | None = None) -> dict:
-        params = {"days": days}
-        if workinggroup:
-            params["workinggroup"] = workinggroup
-        return self._get("/api/panda/activity/", params)
+    def activity(self, *, days: int = 1) -> dict:
+        return self._get("/api/panda/activity/", {"days": days})

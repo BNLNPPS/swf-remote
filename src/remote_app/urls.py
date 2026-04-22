@@ -86,7 +86,12 @@ urlpatterns = [
     path('alarms/', views.alarms_dashboard, name='alarms_dashboard'),
     path('alarms/events/<str:event_uuid>/', views.alarm_event_detail,
          name='alarm_event_detail'),
-    path('alarms/teams/new/', views.team_create, name='team_create'),
+    path('alarms/runs/<str:run_uuid>/<str:entry_id>/',
+         views.alarm_run_report, name='alarm_run_report'),
+    path('alarms/<str:entry_id>/task/',
+         views.alarm_task_history, name='alarm_task_history'),
+    path('alarms/teams/new/', views.team_new, name='team_new'),
+    path('alarms/teams/create/', views.team_create, name='team_create'),
     path('alarms/teams/<str:at_name>/edit/', views.team_edit, name='team_edit'),
     path('alarms/teams/<str:at_name>/save/', views.team_save, name='team_save'),
     path('alarms/teams/<str:at_name>/versions/<int:version_num>/',
@@ -97,6 +102,7 @@ urlpatterns = [
          name='alarm_config_save'),
     path('alarms/<str:entry_id>/versions/<int:version_num>/',
          views.alarm_config_version, name='alarm_config_version'),
+    path('alarms/<str:entry_id>/test/', views.alarm_test, name='alarm_test'),
 
     # Static assets — proxy from swf-monitor so CSS/JS stays in sync
     path('static/<path:path>', views.static_proxy, name='static_proxy'),
