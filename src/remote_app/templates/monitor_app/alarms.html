@@ -246,8 +246,8 @@
                     title="{% if r.enabled %}Emails are ON — notifications are sent on new detections.{% else %}Emails are OFF — detection still runs and events appear on this dashboard; mail is suppressed.{% endif %}">
                     {% if r.enabled %}on{% else %}off{% endif %}
                 </td>
-                <td{% if r.count %} class="failed_fill"{% endif %}>{{ r.count }}</td>
-                <td{% if r.active %} class="failed_fill"{% endif %}>{{ r.active }}</td>
+                <td class="{% if r.count %}failed_fill{% else %}ok_fill{% endif %}">{{ r.count }}</td>
+                <td class="{% if r.active %}failed_fill{% else %}ok_fill{% endif %}">{{ r.active }}</td>
                 <td>{% if r.last_fired_dt %}{{ r.last_fired_dt|naturaltime }}{% else %}—{% endif %}</td>
             </tr>
             {% empty %}
