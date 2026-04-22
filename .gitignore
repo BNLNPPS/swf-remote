@@ -24,6 +24,7 @@ downloads/
 eggs/
 .eggs/
 lib/
+!alarms/swf_alarms/lib/
 lib64/
 parts/
 sdist/

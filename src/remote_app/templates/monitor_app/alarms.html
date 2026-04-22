@@ -280,6 +280,11 @@
                     <td>{{ sec.config.created|fmt_dt }} / {{ sec.config.modified|fmt_dt }}</td></tr>
                 <tr><th>Recipients</th>
                     <td>{{ sec.config.recipients_text|default:'—' }}</td></tr>
+                <tr><th>Source</th>
+                    <td>
+                      <a href="https://github.com/BNLNPPS/swf-remote/blob/main/alarms/swf_alarms/alarms/{{ sec.config.name }}.py"
+                         target="_blank" rel="noopener">alarms/swf_alarms/alarms/{{ sec.config.name }}.py</a>
+                    </td></tr>
             </tbody>
         </table>
 
