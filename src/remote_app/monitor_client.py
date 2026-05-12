@@ -82,6 +82,27 @@ def proxy(request, path, service_user=None):
                 status=405, content_type='application/json',
             )
 
+        # Upstream redirects can't be safely relayed: we'd need to rewrite
+        # the Location across the path prefix and across auth domains
+        # (swf-monitor's /accounts/login/ has no analogue on devcloud). The
+        # original blank-page bug came from passing 302+empty-body+no-Location
+        # straight to the browser. Anonymous browser traffic to protected
+        # views is now gated by @login_required, so we should never see a
+        # login redirect here. If something else upstream starts redirecting,
+        # surface it loudly rather than render a blank page.
+        if 300 <= resp.status_code < 400:
+            loc = resp.headers.get('location', '<no Location>')
+            logger.warning(
+                f"Unforwardable upstream redirect {resp.status_code} from "
+                f"{url} → {loc}"
+            )
+            return HttpResponse(
+                f"Upstream swf-monitor returned {resp.status_code} redirecting "
+                f"to {loc}. swf-remote cannot relay this redirect across the "
+                f"proxy boundary. If this was a protected view, ensure you are "
+                f"logged in; otherwise this is a swf-remote bug — please report.",
+                status=502, content_type='text/plain',
+            )
         body = resp.content
         ct = resp.headers.get('content-type', 'application/json')
         # Rewrite upstream paths to match our mount point.

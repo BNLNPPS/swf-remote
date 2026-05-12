@@ -58,54 +58,67 @@ def testbed_home(request):
 
 # ── PanDA pages (proxied from swf-monitor) ──────────────────────────────────
 
+@login_required
 def panda_activity(request):
     return monitor_client.proxy(request, '/panda/activity/')
 
 
+@login_required
 def panda_jobs_list(request):
     return monitor_client.proxy(request, '/panda/jobs/')
 
 
+@login_required
 def panda_jobs_datatable_ajax(request):
     return monitor_client.proxy(request, '/panda/jobs/datatable/')
 
 
+@login_required
 def panda_jobs_filter_counts(request):
     return monitor_client.proxy(request, '/panda/jobs/filter-counts/')
 
 
+@login_required
 def panda_job_detail(request, pandaid):
     return monitor_client.proxy(request, f'/panda/jobs/{pandaid}/')
 
 
+@login_required
 def panda_tasks_list(request):
     return monitor_client.proxy(request, '/panda/tasks/')
 
 
+@login_required
 def panda_tasks_datatable_ajax(request):
     return monitor_client.proxy(request, '/panda/tasks/datatable/')
 
 
+@login_required
 def panda_tasks_filter_counts(request):
     return monitor_client.proxy(request, '/panda/tasks/filter-counts/')
 
 
+@login_required
 def panda_task_detail(request, jeditaskid):
     return monitor_client.proxy(request, f'/panda/tasks/{jeditaskid}/')
 
 
+@login_required
 def panda_errors_list(request):
     return monitor_client.proxy(request, '/panda/errors/')
 
 
+@login_required
 def panda_errors_datatable_ajax(request):
     return monitor_client.proxy(request, '/panda/errors/datatable/')
 
 
+@login_required
 def panda_diagnostics_list(request):
     return monitor_client.proxy(request, '/panda/diagnostics/')
 
 
+@login_required
 def panda_diagnostics_datatable_ajax(request):
     return monitor_client.proxy(request, '/panda/diagnostics/datatable/')
 
@@ -152,10 +165,12 @@ def panda_api_proxy(request, path):
 # ── EIC PanDA Queues ──────────────────────────────────────────────────────
 # Proxied from swf-monitor (server-rendered pages).
 
+@login_required
 def epic_queues_list(request):
     return monitor_client.proxy(request, '/panda/epic-queues/')
 
 
+@login_required
 def epic_queue_detail(request, queue_name):
     return monitor_client.proxy(request, f'/panda/epic-queues/{queue_name}/')
 
