@@ -37,6 +37,7 @@ urlpatterns = [
 
     # PCS (Physics Configuration System) — all proxied from swf-monitor
     path('pcs/', views.pcs_proxy, name='pcs_hub'),
+    path('pcs/catalog/', views.pcs_proxy, name='pcs_catalog'),
     path('pcs/categories/', views.pcs_proxy, name='pcs_categories_list'),
     path('pcs/categories/create/', views.pcs_proxy, name='pcs_category_create'),
 
