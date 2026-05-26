@@ -1,3 +1,4 @@
+from django.contrib.auth.decorators import login_required
 from django.urls import path
 from . import views
 
@@ -37,7 +38,7 @@ urlpatterns = [
 
     # PCS (Physics Configuration System) — all proxied from swf-monitor
     path('pcs/', views.pcs_proxy, name='pcs_hub'),
-    path('pcs/catalog/', views.pcs_proxy, name='pcs_catalog'),
+    path('pcs/catalog/', login_required(views.pcs_proxy), name='pcs_catalog'),
     path('pcs/categories/', views.pcs_proxy, name='pcs_categories_list'),
     path('pcs/categories/create/', views.pcs_proxy, name='pcs_category_create'),
 
