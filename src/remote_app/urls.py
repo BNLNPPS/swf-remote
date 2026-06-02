@@ -84,6 +84,9 @@ urlpatterns = [
     # PanDA REST API (read-only JSON; catch-all proxy for DRF endpoints)
     path('api/panda/<path:path>', views.panda_api_proxy, name='panda_api_proxy'),
 
+    # SSE relay — dedicated streaming proxy for live browser push (see SSE_PUSH.md)
+    path('api/messages/stream/', views.sse_proxy, name='sse_stream'),
+
     # Alarm dashboard (entries-backed; see alarm_views.py)
     path('alarms/', views.alarms_dashboard, name='alarms_dashboard'),
     path('alarms/events/<str:event_uuid>/', views.alarm_event_detail,

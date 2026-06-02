@@ -11,7 +11,7 @@ import logging
 import re
 import httpx
 from django.conf import settings
-from django.http import HttpResponse
+from django.http import HttpResponse, StreamingHttpResponse
 from django.template.loader import render_to_string
 
 logger = logging.getLogger(__name__)
@@ -40,6 +40,45 @@ NAV_PROD_END_RE = re.compile(
 
 def _base():
     return settings.SWF_MONITOR_URL.rstrip('/')
+
+
+def stream_sse(request, path):
+    """Stream an SSE endpoint from swf-monitor to the caller without buffering.
+
+    Unlike proxy() — which reads the full body and rewrites URLs, impossible for
+    an open-ended text/event-stream — this opens a streaming upstream request and
+    relays chunks as they arrive, for the life of the connection. Authenticated by
+    a service token (the SSE endpoint honors Authorization: Token, not the
+    X-Remote-User the HTML proxy uses). Failures surface as an SSE 'error' event,
+    never a silent dead stream. See swf-monitor/docs/SSE_PUSH.md.
+    """
+    url = f"{_base()}{path}"
+    headers = dict(UPSTREAM_HEADERS)
+    if getattr(settings, 'SWF_MONITOR_TOKEN', ''):
+        headers['Authorization'] = f"Token {settings.SWF_MONITOR_TOKEN}"
+    # read timeout > the relay's ~30s heartbeat: a healthy stream never trips it,
+    # but a dead upstream is reclaimed rather than leaking a mod_wsgi worker.
+    timeout = httpx.Timeout(connect=10.0, read=60.0, write=10.0, pool=10.0)
+
+    def event_stream():
+        try:
+            with httpx.stream('GET', url, params=request.GET.dict(),
+                              headers=headers, verify=False, timeout=timeout) as upstream:
+                if upstream.status_code != 200:
+                    detail = upstream.read().decode('utf-8', 'replace')[:300]
+                    logger.error(f"SSE upstream {upstream.status_code} from {url}: {detail}")
+                    yield f"event: error\ndata: upstream {upstream.status_code}\n\n".encode()
+                    return
+                for chunk in upstream.iter_raw():
+                    yield chunk
+        except Exception as e:
+            logger.error(f"SSE stream proxy error for {url}: {e}")
+            yield b"event: error\ndata: stream proxy error\n\n"
+
+    resp = StreamingHttpResponse(event_stream(), content_type='text/event-stream')
+    resp['Cache-Control'] = 'no-cache'
+    resp['X-Accel-Buffering'] = 'no'
+    return resp
 
 
 def proxy(request, path, service_user=None):

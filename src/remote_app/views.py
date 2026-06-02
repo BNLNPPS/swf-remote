@@ -162,6 +162,18 @@ def panda_api_proxy(request, path):
     )
 
 
+@login_required
+def sse_proxy(request):
+    """Stream swf-monitor's SSE relay to the browser for live push.
+
+    A dedicated streaming proxy — the buffering proxy() cannot carry an
+    open-ended text/event-stream. Gated by login here (same-origin to devcloud);
+    authenticated to swf-monitor by a service token over the tunnel.
+    See swf-monitor/docs/SSE_PUSH.md.
+    """
+    return monitor_client.stream_sse(request, '/api/messages/stream/')
+
+
 # ── EIC PanDA Queues ──────────────────────────────────────────────────────
 # Proxied from swf-monitor (server-rendered pages).
 

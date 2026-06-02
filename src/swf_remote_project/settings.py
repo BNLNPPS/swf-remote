@@ -101,3 +101,9 @@ LOGOUT_REDIRECT_URL = 'monitor_app:home'
 
 # swf-monitor REST base URL (via SSH tunnel to pandaserver02)
 SWF_MONITOR_URL = config('SWF_REMOTE_MONITOR_URL', default='https://localhost:18443/swf-monitor')
+
+# Service token for the SSE stream proxy hop (monitor_client.stream_sse). The
+# monitor's SSE endpoint honors Authorization: Token, not the X-Remote-User the
+# HTML proxy uses, so this is provisioned separately on ec2dev. See
+# swf-monitor/docs/SSE_PUSH.md.
+SWF_MONITOR_TOKEN = config('SWF_REMOTE_MONITOR_TOKEN', default='')
