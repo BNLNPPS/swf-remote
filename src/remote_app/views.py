@@ -84,6 +84,16 @@ def panda_job_detail(request, pandaid):
 
 
 @login_required
+def panda_proxy(request, **kwargs):
+    """Catch-all: proxy any PanDA monitor page to swf-monitor by request path, so
+    swf-remote never drifts from swf-monitor's route list as it grows (mirrors
+    pcs_proxy). Authorization is enforced by the monitor per Django user. The
+    payload-log 'Retrieving…' page comes through here too; its rewritten
+    EventSource URL is served by sse_proxy. See swf-monitor/docs/SSE_PUSH.md."""
+    return monitor_client.proxy(request, request.path_info)
+
+
+@login_required
 def panda_tasks_list(request):
     return monitor_client.proxy(request, '/panda/tasks/')
 

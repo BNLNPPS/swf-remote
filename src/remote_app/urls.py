@@ -1,5 +1,5 @@
 from django.contrib.auth.decorators import login_required
-from django.urls import path
+from django.urls import path, re_path
 from . import views
 
 app_name = 'monitor_app'
@@ -111,4 +111,13 @@ urlpatterns = [
 
     # Static assets — proxy from swf-monitor so CSS/JS stays in sync
     path('static/<path:path>', views.static_proxy, name='static_proxy'),
+
+    # Catch-all proxies (LAST, so the explicit routes above win and keep their
+    # {% url %} names): any panda/ or pcs/ page not explicitly routed is proxied
+    # wholesale, so swf-remote never drifts from swf-monitor's route list as it
+    # grows — no per-route maintenance. Authorization is enforced by the monitor
+    # per Django user (X-Remote-User). pcs/api/ and panda/view-text/ are matched
+    # explicitly above. See ../CLAUDE.md and swf-monitor/docs/SSE_PUSH.md.
+    re_path(r'^panda/', views.panda_proxy, name='panda_proxy_all'),
+    re_path(r'^pcs/', views.pcs_proxy, name='pcs_proxy_all'),
 ]
