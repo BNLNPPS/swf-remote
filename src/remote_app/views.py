@@ -137,8 +137,18 @@ def panda_diagnostics_datatable_ajax(request):
 # All PCS views proxy full rendered HTML from swf-monitor. Single handler
 # forwards based on request path — no need for per-view functions.
 
+@csrf_exempt
 def pcs_proxy(request, **kwargs):
-    """Proxy any PCS page to swf-monitor based on request path."""
+    """Proxy any PCS page to swf-monitor based on request path.
+
+    csrf_exempt for the same reason as logout_view and pcs_api_proxy: a proxied
+    page carries swf-monitor's CSRF token, which swf-remote can never validate
+    against its own cookie. Authorization is enforced by login_required here and
+    by swf-monitor per X-Remote-User through the tunnel (swf-monitor in turn
+    exempts localhost/tunnel requests from CSRF). Without this, proxied form
+    POSTs — e.g. the catalog Update-from-CSV button — are rejected before they
+    can reach the tunnel. login_required() preserves this flag via functools.wraps.
+    """
     path = request.path_info  # e.g. /pcs/tags/p/compose/ (excludes SCRIPT_NAME)
     return monitor_client.proxy(request, path)
 
