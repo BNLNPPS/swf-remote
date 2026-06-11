@@ -10,14 +10,18 @@ monitoring services that live behind BNL's firewall.
 
 ```
 Browser → epic-devcloud.org (Django/Apache)
-              ↓ proxy (DataTables AJAX, filter counts)
+              ↓ proxy (full rendered HTML)
           SSH tunnel (autossh, persistent)
               ↓
           swf-monitor (BNL) → PanDA database
 ```
 
-- **Web pages** proxy swf-monitor's DataTables AJAX endpoints through
-  the SSH tunnel. Same templates, same URL structure.
+- **Web pages** — the hub, all PanDA views, and all PCS views — are
+  proxied as full rendered HTML from swf-monitor through the SSH tunnel
+  (`remote_app/monitor_client.proxy`), which rewrites swf-monitor URLs to
+  local `/prod/` paths and swaps in local auth controls. Same URL
+  structure. Only swf-remote's own pages render locally (see
+  *Local vs proxied pages*).
 - **MCP server** (planned) re-exposes PanDA data for LLM access
   outside BNL, using thin REST endpoints on swf-monitor.
 - **No local PanDA data** — all data comes from swf-monitor in real time.
@@ -102,12 +106,20 @@ sudo systemctl status swf-remote-tunnel
 Environment variables prefixed `SWF_REMOTE_` to avoid collisions with
 other apps on the same server. See `.env.example`.
 
-## Template sharing
+## Local vs proxied pages
 
-swf-remote shares templates with swf-monitor via symlink (created by
-`setup-dev.sh`). swf-remote overrides `base.html` (nav bar) and
-`panda_hub.html` (hub page). All other PanDA templates are used as-is
-from swf-monitor.
+Most pages — the hub, all PanDA views, and all PCS views — are served as
+full rendered HTML proxied from swf-monitor (`remote_app/views.py`), so
+they carry swf-monitor's own templates, nav, and styling. swf-remote
+renders a smaller set itself, all using its own `base.html` (the dark nav
+bar): the Alarms pages (swf-remote-only; see `docs/alarms.md`), the
+account page, and the login / password-change pages.
 
-URL names use `app_name = 'monitor_app'` so `{% url %}` tags in shared
-templates resolve to swf-remote's own routes.
+The proxy (`monitor_client.proxy`) preserves swf-monitor's page body and
+`<style>`, rewriting only URLs and the auth controls — so swf-monitor's
+own nav and styling reach the browser intact on proxied pages.
+
+swf-remote keeps a symlink to swf-monitor's templates (created by
+`setup-dev.sh`) for the shared assets the local pages pull in. URL names
+use `app_name = 'monitor_app'` so `{% url %}` tags resolve to swf-remote's
+own routes.

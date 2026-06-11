@@ -7,8 +7,10 @@ Sister project to swf-monitor, swf-testbed, swf-common-lib.
 
 ## Architecture
 
-- **Web pages**: DataTables views calling monitor_client for data, formatting
-  responses with local URLs. Templates mirror swf-monitor's pandamon pages.
+- **Web pages**: most (hub, PanDA, PCS) are full rendered HTML proxied from
+  swf-monitor via monitor_client.proxy(), with swf-monitor URLs rewritten to
+  local /prod/ paths. Only the Alarms pages, account, and auth pages render
+  locally with swf-remote's own base.html.
 - **MCP server**: Re-exposes PanDA data for LLM access outside BNL.
 - **Data source**: Thin REST endpoints on swf-monitor wrapping panda/queries.py.
 - **No local PanDA data**: All data comes from swf-monitor through the tunnel.
