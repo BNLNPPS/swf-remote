@@ -49,6 +49,7 @@ urlpatterns = [
     # Tags
     path('pcs/tags/<str:tag_type>/', views.pcs_proxy, name='pcs_tags_list'),
     path('pcs/tags/<str:tag_type>/datatable/', views.pcs_proxy, name='pcs_tags_datatable_ajax'),
+    path('pcs/tags/<str:tag_type>/<int:tag_number>/datasets/', views.pcs_proxy, name='pcs_tag_datasets'),
     path('pcs/tags/<str:tag_type>/<int:tag_number>/', views.pcs_proxy, name='pcs_tag_detail'),
     path('pcs/tags/<str:tag_type>/<int:tag_number>/edit/', views.pcs_proxy, name='pcs_tag_edit'),
     path('pcs/tags/<str:tag_type>/<int:tag_number>/delete/', views.pcs_proxy, name='pcs_tag_delete'),
