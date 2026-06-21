@@ -29,9 +29,7 @@ NAV_AUTH_RE = re.compile(rb'<div class="nav-auth">.*?</div>', re.DOTALL)
 # <span class="nav-mode nav-production">…</span>). swf-monitor itself
 # doesn't know about devcloud alarms, so we surface them here on the
 # proxied pages the same way we replace nav-auth.
-NAV_ALARMS_LINK = (
-    b'<a href="/prod/alarms/" style="margin-left:1em;">Alarms</a>'
-)
+NAV_ALARMS_LINK = b'<a href="/prod/alarms/">Alarms</a>'
 NAV_PROD_END_RE = re.compile(
     rb'(<span class="nav-mode nav-production">[\s\S]*?)(</span>)',
     re.DOTALL,

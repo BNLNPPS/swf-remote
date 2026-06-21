@@ -9,21 +9,39 @@
     <link rel="stylesheet" href="{% static 'css/style.css' %}">
     <link rel="stylesheet" href="{% static 'css/state-colors.css' %}">
     <style>
-      nav { display: flex; align-items: center; gap: 1em; padding: .5em 1em; background: #222; position: sticky; top: 0; z-index: 1030; }
+      nav { display: flex; align-items: center; gap: .8em; padding: .5em 1em; background: #222; position: sticky; top: 0; z-index: 1030; }
       .nav-spacer { flex: 1 1 auto; }
       .nav-auth { display: flex; gap: 1em; align-items: center; }
       nav a, .dropbtn { color: #ADD8E6; text-decoration: none; }
       nav a:hover { text-decoration: underline; }
+      nav a.nav-active, .dropbtn.nav-active {
+        text-shadow: 0 0 .65px currentColor, 0 0 .65px currentColor;
+      }
 
       .dropbtn { background: inherit; padding: 0; font-size: inherit; border: none; cursor: pointer; }
-      .dropdown { position: relative; display: inline-block; margin-right: 1em; }
+      .dropdown { position: relative; display: inline-block; margin-right: .35em; }
       .dropdown-content {
         display: none; position: absolute; background: #f9f9f9;
         min-width: 180px; box-shadow: 0 8px 16px rgba(0,0,0,.2); z-index: 1;
       }
       .dropdown-content a { color: #000; padding: 10px 14px; display: block; }
+      .dropdown-content a.nav-active { background-color: #e9ecef; }
       .dropdown-content a:hover { background: #f1f1f1; }
       .dropdown:hover .dropdown-content { display: block; }
+      #mode-label {
+        border-right: 1px solid rgba(255,255,255,.2);
+        color: #fff;
+        font-weight: 700;
+        margin-right: 4px;
+        padding-right: 12px;
+      }
+      .nav-label {
+        color: #fff;
+        font-weight: 700;
+      }
+      .nav-panda-label {
+        margin-left: 1.5em;
+      }
 
       /* PCS canonical Edit button — filled dark green, matches swf-monitor. */
       .btn.btn-dark-green {
@@ -39,36 +57,48 @@
     {% block extra_head %}{% endblock %}
 </head>
 <body>
+    {% with url_name=request.resolver_match.url_name|default:'' %}
     <nav>
-        <a href="{% url 'monitor_app:prod_home' %}"><strong>ePIC Production Monitor</strong></a>
+        <div class="dropdown" id="mode-flipper">
+            <button class="dropbtn" id="mode-label">epicprod</button>
+            <div class="dropdown-content">
+                <a href="{% url 'monitor_app:prod_home' %}">epicprod - ePIC Production</a>
+            </div>
+        </div>
 
-        <a href="{% url 'monitor_app:panda_activity' %}">Activity</a>
-        <a href="{% url 'monitor_app:panda_jobs_list' %}">Jobs</a>
-        <a href="{% url 'monitor_app:panda_tasks_list' %}">Tasks</a>
-        <a href="{% url 'monitor_app:panda_errors_list' %}">Errors</a>
-        <a href="{% url 'monitor_app:panda_diagnostics_list' %}">Diagnostics</a>
-        <a href="{% url 'monitor_app:epic_queues_list' %}">Queues</a>
+        <a href="{% url 'monitor_app:questionnaires_list' %}" class="{% if 'questionnaire' in url_name %}nav-active{% endif %}">Requests</a>
 
         <div class="dropdown">
-            <button class="dropbtn">PCS</button>
+            <button class="dropbtn{% if url_name|slice:':4' == 'pcs_' and url_name != 'pcs_catalog' %} nav-active{% endif %}">PCS</button>
             <div class="dropdown-content">
-                <a href="{% url 'monitor_app:pcs_hub' %}">PCS Hub</a>
+                <a href="{% url 'monitor_app:pcs_hub' %}" class="{% if url_name == 'pcs_hub' %}nav-active{% endif %}">PCS Hub</a>
+                <a href="{% url 'monitor_app:pcs_categories_list' %}" class="{% if url_name == 'pcs_categories_list' %}nav-active{% endif %}">Physics Categories</a>
                 <a href="{% url 'monitor_app:pcs_tag_compose' tag_type='p' %}">Physics Tags</a>
                 <a href="{% url 'monitor_app:pcs_tag_compose' tag_type='e' %}">EvGen Tags</a>
                 <a href="{% url 'monitor_app:pcs_tag_compose' tag_type='s' %}">Simu Tags</a>
                 <a href="{% url 'monitor_app:pcs_tag_compose' tag_type='r' %}">Reco Tags</a>
-                <a href="{% url 'monitor_app:pcs_datasets_compose' %}">Datasets</a>
-                <a href="{% url 'monitor_app:pcs_prod_configs_compose' %}">Prod Configs</a>
-                <a href="{% url 'monitor_app:pcs_task_compose' %}?tab=tasks">Prod Tasks</a>
+                <a href="{% url 'monitor_app:pcs_tag_compose' tag_type='k' %}">Background Tags</a>
+                <a href="{% url 'monitor_app:pcs_datasets_compose' %}" class="{% if url_name == 'pcs_datasets_compose' %}nav-active{% endif %}">Datasets</a>
+                <a href="{% url 'monitor_app:pcs_prod_configs_compose' %}" class="{% if url_name == 'pcs_prod_configs_compose' %}nav-active{% endif %}">Prod Configs</a>
+                <a href="{% url 'monitor_app:pcs_task_compose' %}?tab=tasks" class="{% if url_name == 'pcs_task_compose' %}nav-active{% endif %}">Prod Tasks</a>
             </div>
         </div>
 
-        <a href="{% url 'monitor_app:alarms_dashboard' %}">Alarms</a>
+        <a href="{% url 'monitor_app:pcs_catalog' %}" class="{% if url_name == 'pcs_catalog' %}nav-active{% endif %}">Campaigns</a>
+        <strong class="nav-label nav-panda-label">PanDA</strong>
+        <a href="{% url 'monitor_app:panda_activity' %}" class="{% if url_name == 'panda_activity' %}nav-active{% endif %}">Activity</a>
+        <a href="{% url 'monitor_app:panda_tasks_list' %}" class="{% if 'panda_task' in url_name %}nav-active{% endif %}">Tasks</a>
+        <a href="{% url 'monitor_app:panda_jobs_list' %}" class="{% if 'panda_job' in url_name %}nav-active{% endif %}">Jobs</a>
+        <a href="{% url 'monitor_app:panda_errors_list' %}" class="{% if 'panda_errors' in url_name %}nav-active{% endif %}">Errors</a>
+        <a href="{% url 'monitor_app:panda_diagnostics_list' %}" class="{% if 'panda_diagnostics' in url_name %}nav-active{% endif %}">Diagnostics</a>
+        <a href="{% url 'monitor_app:epic_queues_list' %}" class="{% if 'epic_queue' in url_name %}nav-active{% endif %}">Queues</a>
+        <a href="{% url 'monitor_app:alarms_dashboard' %}" class="{% if 'alarm' in url_name or 'team_' in url_name %}nav-active{% endif %}">Alarms</a>
 
         <span class="nav-spacer"></span>
         <a href="{% url 'monitor_app:about' %}">About</a>
         {% include 'monitor_app/_nav_auth.html' %}
     </nav>
+    {% endwith %}
     <main>
         {% block content %}{% endblock %}
     </main>

@@ -39,6 +39,11 @@ urlpatterns = [
     # PCS (Physics Configuration System) — all proxied from swf-monitor
     path('pcs/', views.pcs_proxy, name='pcs_hub'),
     path('pcs/catalog/', views.pcs_proxy, name='pcs_catalog'),
+    path('pcs/questionnaires/', views.pcs_proxy, name='questionnaires_list'),
+    path('pcs/questionnaires/import/', views.pcs_proxy, name='questionnaire_import'),
+    path('pcs/questionnaires/<int:pk>/', views.pcs_proxy, name='questionnaire_detail'),
+    path('pcs/questionnaires/<int:pk>/matches/', views.pcs_proxy, name='questionnaire_match_add'),
+    path('pcs/questionnaires/<int:pk>/matches/<int:task_id>/remove/', views.pcs_proxy, name='questionnaire_match_remove'),
     path('pcs/categories/', views.pcs_proxy, name='pcs_categories_list'),
     path('pcs/categories/create/', views.pcs_proxy, name='pcs_category_create'),
 
