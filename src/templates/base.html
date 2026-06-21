@@ -92,7 +92,6 @@
         <a href="{% url 'monitor_app:panda_errors_list' %}" class="{% if 'panda_errors' in url_name %}nav-active{% endif %}">Errors</a>
         <a href="{% url 'monitor_app:panda_diagnostics_list' %}" class="{% if 'panda_diagnostics' in url_name %}nav-active{% endif %}">Diagnostics</a>
         <a href="{% url 'monitor_app:epic_queues_list' %}" class="{% if 'epic_queue' in url_name %}nav-active{% endif %}">Queues</a>
-        <a href="{% url 'monitor_app:alarms_dashboard' %}" class="{% if 'alarm' in url_name or 'team_' in url_name %}nav-active{% endif %}">Alarms</a>
 
         <span class="nav-spacer"></span>
         <a href="{% url 'monitor_app:about' %}">About</a>
