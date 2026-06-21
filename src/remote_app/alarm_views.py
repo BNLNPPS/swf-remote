@@ -1,4 +1,7 @@
-"""Alarm dashboard + editor views.
+"""Historical local Alarm dashboard + editor views.
+
+Live /prod/alarms/... now proxies to swf-monitor. This module is retained for
+rollback/reference only; src/remote_app/urls.py no longer routes to these views.
 
 The dashboard lives at /prod/alarms/. It renders:
   1. A top summary table (one row per alarm config) — last-N-hours counts,

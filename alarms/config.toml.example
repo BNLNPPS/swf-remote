@@ -1,4 +1,10 @@
-# swf-alarms engine config — copy to config.toml.
+# Historical swf-remote alarm config.
+#
+# The live alarm engine moved to swf-monitor. Do not use this file for normal
+# operations; see swf-monitor/alarms/config.toml.example and
+# swf-monitor/docs/alarms.md.
+#
+# Old swf-alarms engine config — copy to config.toml only for rollback.
 #
 # Alarm *configurations* (thresholds, recipients, severities, enabled flags)
 # live in the DB as kind='alarm' entries in the swf-alarms context. Edit

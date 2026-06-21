@@ -108,12 +108,13 @@ other apps on the same server. See `.env.example`.
 
 ## Local vs proxied pages
 
-Most pages — the hub, all PanDA views, and all PCS views — are served as
+Most pages — the hub, all PanDA views, Alarms, and all PCS views — are served as
 full rendered HTML proxied from swf-monitor (`remote_app/views.py`), so
 they carry swf-monitor's own templates, nav, and styling. swf-remote
 renders a smaller set itself, all using its own `base.html` (the dark nav
-bar): the Alarms pages (swf-remote-only; see `docs/alarms.md`), the
-account page, and the login / password-change pages.
+bar): the account page and the login / password-change pages. Alarm code
+from the old local implementation remains in the tree for rollback/reference,
+but live `/prod/alarms/...` pages proxy to swf-monitor.
 
 The proxy (`monitor_client.proxy`) preserves swf-monitor's page body and
 `<style>`, rewriting only URLs and the auth controls — so swf-monitor's

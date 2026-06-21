@@ -1,5 +1,10 @@
 #!/usr/bin/env bash
-# swf-alarms install — creates venv, installs package, prepares log dir.
+# Historical swf-remote swf-alarms install.
+#
+# The live alarm runner moved to swf-monitor on pandaserver02. This script is
+# retained for rollback/reference only; do not run it for normal operations.
+#
+# swf-alarms install - creates venv, installs package, prepares log dir.
 # Alarm state lives in swf-remote's Postgres; schema is owned by
 # swf-remote's Django migrations and applied by its deploy script, not here.
 #

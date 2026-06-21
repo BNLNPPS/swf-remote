@@ -1,4 +1,9 @@
-"""Engine config — just engine-level + DB + email. Alarm CONFIGS live in
+"""Historical swf-remote engine config.
+
+The live alarm engine moved to swf-monitor. This module is retained for
+rollback/reference only.
+
+Engine config — just engine-level + DB + email. Alarm CONFIGS live in
 the DB now (kind='alarm' entries), not in TOML. Operators edit them via
 the /prod/alarms/<name>/edit/ UI.
 """

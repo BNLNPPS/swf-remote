@@ -1,4 +1,7 @@
-"""REST client — talks to swf-remote's /api/panda/* proxy on loopback.
+"""Historical REST client for the old swf-remote alarm runner.
+
+The live alarm engine moved to swf-monitor. This module is retained for
+rollback/reference only.
 
 We intentionally do NOT reach pandaserver02 directly. swf-remote owns the
 SSH tunnel; every consumer goes through it. Running this engine from a

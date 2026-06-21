@@ -1,4 +1,7 @@
-"""Postgres access to swf-remote's `entry` / `entry_context` tables.
+"""Historical Postgres access to swf-remote's `entry` / `entry_context` tables.
+
+The live alarm engine moved to swf-monitor. This module is retained for
+rollback/reference only.
 
 The alarm engine runs standalone (no Django), but the state it writes lives
 in swf-remote's own Postgres, not a side store. Schema is owned by Django

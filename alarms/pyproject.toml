@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "swf-alarms"
 version = "0.1.0"
-description = "Standalone polling alarm engine for swf ecosystem (PanDA, streaming testbed). REST-fed, sqlite state, SES email + extensible channels."
+description = "Historical swf-remote alarm engine retained for rollback/reference. Live alarms moved to swf-monitor."
 requires-python = ">=3.11"
 dependencies = [
     "httpx>=0.27",
