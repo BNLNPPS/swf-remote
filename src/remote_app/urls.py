@@ -93,27 +93,10 @@ urlpatterns = [
     # SSE relay — dedicated streaming proxy for live browser push (see SSE_PUSH.md)
     path('api/messages/stream/', views.sse_proxy, name='sse_stream'),
 
-    # Alarm dashboard (entries-backed; see alarm_views.py)
-    path('alarms/', views.alarms_dashboard, name='alarms_dashboard'),
-    path('alarms/events/<str:event_uuid>/', views.alarm_event_detail,
-         name='alarm_event_detail'),
-    path('alarms/runs/<str:run_uuid>/<str:entry_id>/',
-         views.alarm_run_report, name='alarm_run_report'),
-    path('alarms/<str:entry_id>/task/',
-         views.alarm_task_history, name='alarm_task_history'),
-    path('alarms/teams/new/', views.team_new, name='team_new'),
-    path('alarms/teams/create/', views.team_create, name='team_create'),
-    path('alarms/teams/<str:at_name>/edit/', views.team_edit, name='team_edit'),
-    path('alarms/teams/<str:at_name>/save/', views.team_save, name='team_save'),
-    path('alarms/teams/<str:at_name>/versions/<int:version_num>/',
-         views.team_version, name='team_version'),
-    path('alarms/<str:entry_id>/edit/', views.alarm_config_edit,
-         name='alarm_config_edit'),
-    path('alarms/<str:entry_id>/save/', views.alarm_config_save,
-         name='alarm_config_save'),
-    path('alarms/<str:entry_id>/versions/<int:version_num>/',
-         views.alarm_config_version, name='alarm_config_version'),
-    path('alarms/<str:entry_id>/test/', views.alarm_test, name='alarm_test'),
+    # Alarms now live in swf-monitor. Keep the old local alarm code present
+    # for rollback/reference, but serve these paths through the proxy.
+    path('alarms/', views.alarms_proxy, name='alarms_dashboard'),
+    re_path(r'^alarms/.+', views.alarms_proxy, name='alarms_proxy_all'),
 
     # Static assets — proxy from swf-monitor so CSS/JS stays in sync
     path('static/<path:path>', views.static_proxy, name='static_proxy'),

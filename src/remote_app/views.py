@@ -180,6 +180,16 @@ def sse_proxy(request):
     return monitor_client.stream_sse(request, '/api/messages/stream/')
 
 
+@csrf_exempt
+def alarms_proxy(request, **kwargs):
+    """Proxy alarm pages to swf-monitor.
+
+    Alarms now live in swf-monitor. swf-remote keeps its old alarm code in the
+    tree for rollback/reference, but no longer serves it locally.
+    """
+    return monitor_client.proxy(request, request.path_info)
+
+
 # ── EIC PanDA Queues ──────────────────────────────────────────────────────
 # Proxied from swf-monitor (server-rendered pages).
 
@@ -194,23 +204,6 @@ def epic_queue_detail(request, queue_name):
 def static_proxy(request, path):
     """Proxy static assets from swf-monitor — CSS, JS always in sync."""
     return monitor_client.proxy(request, f'/static/{path}')
-
-
-from .alarm_views import (  # noqa: E402
-    alarms_dashboard,
-    alarm_event_detail,
-    alarm_config_edit,
-    alarm_config_save,
-    alarm_config_version,
-    alarm_test,
-    alarm_run_report,
-    alarm_task_history,
-    team_create,
-    team_new,
-    team_edit,
-    team_save,
-    team_version,
-)
 
 
 def panda_view_text(request):
