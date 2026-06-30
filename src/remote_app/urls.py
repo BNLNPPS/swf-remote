@@ -11,6 +11,9 @@ urlpatterns = [
     path('account/', views.account, name='account'),
     path('about/', views.about, name='about'),
 
+    # epicprod AI pages — proxied from swf-monitor
+    re_path(r'^ai/', views.ai_proxy, name='ai_proxy_all'),
+
     # PanDA Production Monitor — proxied from swf-monitor
     path('panda/activity/', views.panda_activity, name='panda_activity'),
 

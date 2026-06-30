@@ -56,6 +56,12 @@ def testbed_home(request):
     return monitor_client.proxy(request, '/testbed/')
 
 
+@csrf_exempt
+def ai_proxy(request, **kwargs):
+    """Proxy epicprod AI pages from swf-monitor."""
+    return monitor_client.proxy(request, request.path_info)
+
+
 # ── PanDA pages (proxied from swf-monitor) ──────────────────────────────────
 
 def panda_activity(request):
