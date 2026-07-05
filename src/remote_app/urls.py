@@ -21,6 +21,7 @@ urlpatterns = [
     path('panda/jobs/datatable/', views.panda_jobs_datatable_ajax, name='panda_jobs_datatable_ajax'),
     path('panda/jobs/filter-counts/', views.panda_jobs_filter_counts, name='panda_jobs_filter_counts'),
     path('panda/jobs/<int:pandaid>/', views.panda_job_detail, name='panda_job_detail'),
+    path('panda/jobs/<int:pandaid>/payload-log/', views.panda_job_payload_log, name='panda_job_payload_log'),
 
     path('panda/tasks/', views.panda_tasks_list, name='panda_tasks_list'),
     path('panda/tasks/datatable/', views.panda_tasks_datatable_ajax, name='panda_tasks_datatable_ajax'),

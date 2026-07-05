@@ -13,6 +13,24 @@ from django.views.decorators.csrf import csrf_exempt
 
 from . import monitor_client
 
+CRAWLER_UA_TOKENS = (
+    'GoogleOther',
+    'Googlebot',
+    'Google-Extended',
+    'GPTBot',
+    'ChatGPT-User',
+    'OAI-SearchBot',
+    'ClaudeBot',
+    'Claude-User',
+    'anthropic-ai',
+    'PerplexityBot',
+    'CCBot',
+    'DotBot',
+    'SemrushBot',
+    'Baiduspider',
+    'Amazonbot',
+)
+
 
 # ── Auth ─────────────────────────────────────────────────────────────────────
 
@@ -84,12 +102,22 @@ def panda_job_detail(request, pandaid):
     return monitor_client.proxy(request, f'/panda/jobs/{pandaid}/')
 
 
+def panda_job_payload_log(request, pandaid):
+    """Deny crawler-triggered payload-log retrieval."""
+    ua = request.META.get('HTTP_USER_AGENT', '')
+    if any(token.lower() in ua.lower() for token in CRAWLER_UA_TOKENS):
+        return HttpResponse(
+            'Automated crawlers may not trigger payload log retrieval.\n',
+            status=403,
+            content_type='text/plain',
+        )
+    return monitor_client.proxy(request, f'/panda/jobs/{pandaid}/payload-log/')
+
+
 def panda_proxy(request, **kwargs):
     """Catch-all: proxy any PanDA monitor page to swf-monitor by request path, so
     swf-remote never drifts from swf-monitor's route list as it grows (mirrors
-    pcs_proxy). Authorization is enforced by the monitor per Django user. The
-    payload-log 'Retrieving…' page comes through here too; its rewritten
-    EventSource URL is served by sse_proxy. See swf-monitor/docs/SSE_PUSH.md."""
+    pcs_proxy). Authorization is enforced by the monitor per Django user."""
     return monitor_client.proxy(request, request.path_info)
 
 

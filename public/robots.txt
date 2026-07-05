@@ -1,0 +1,5 @@
+User-agent: *
+Disallow: /prod/panda/jobs/*/payload-log/
+
+User-agent: Google-Extended
+Disallow: /
