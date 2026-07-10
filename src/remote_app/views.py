@@ -80,6 +80,12 @@ def ai_proxy(request, **kwargs):
     return monitor_client.proxy(request, request.path_info)
 
 
+@csrf_exempt
+def logs_proxy(request, **kwargs):
+    """Proxy swf-monitor log pages from devcloud."""
+    return monitor_client.proxy(request, request.path_info)
+
+
 # ── PanDA pages (proxied from swf-monitor) ──────────────────────────────────
 
 def panda_activity(request):
