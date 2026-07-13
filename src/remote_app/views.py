@@ -86,6 +86,11 @@ def logs_proxy(request, **kwargs):
     return monitor_client.proxy(request, request.path_info)
 
 
+def compute_usage_proxy(request, **kwargs):
+    """Proxy the production compute-usage page and its data endpoint."""
+    return monitor_client.proxy(request, request.path_info)
+
+
 # ── PanDA pages (proxied from swf-monitor) ──────────────────────────────────
 
 def panda_activity(request):

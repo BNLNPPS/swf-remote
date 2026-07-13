@@ -14,6 +14,8 @@ urlpatterns = [
     # epicprod AI pages — proxied from swf-monitor
     re_path(r'^ai/', views.ai_proxy, name='ai_proxy_all'),
     re_path(r'^logs/', views.logs_proxy, name='logs_proxy_all'),
+    re_path(r'^compute-usage/', views.compute_usage_proxy,
+            name='compute_usage_proxy_all'),
 
     # PanDA Production Monitor — proxied from swf-monitor
     path('panda/activity/', views.panda_activity, name='panda_activity'),
