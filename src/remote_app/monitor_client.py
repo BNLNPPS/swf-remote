@@ -9,6 +9,8 @@ Two modes:
 
 import logging
 import re
+from urllib.parse import urlsplit
+
 import httpx
 from django.conf import settings
 from django.http import HttpResponse, StreamingHttpResponse
@@ -23,6 +25,27 @@ UPSTREAM_HEADERS = {'Host': 'pandaserver02.sdcc.bnl.gov'}
 # rendered fragment so account/login/logout actions resolve to swf-remote
 # (devcloud) URLs, not upstream BNL URLs. Devcloud has its own user table.
 NAV_AUTH_RE = re.compile(rb'<div class="nav-auth">.*?</div>', re.DOTALL)
+
+PROXIED_REDIRECT_ROOTS = ('/pcs/', '/panda/', '/ai/', '/logs/', '/alarms/')
+
+
+def _local_redirect_location(location):
+    """Rewrite an upstream proxied-page redirect to the local mount point."""
+    parsed = urlsplit(location or '')
+    if parsed.scheme or parsed.netloc:
+        return ''
+    upstream_prefix = '/swf-monitor'
+    if not parsed.path.startswith(upstream_prefix + '/'):
+        return ''
+    proxied_path = parsed.path[len(upstream_prefix):]
+    if not proxied_path.startswith(PROXIED_REDIRECT_ROOTS):
+        return ''
+    target = f"{(settings.FORCE_SCRIPT_NAME or '').rstrip('/')}{proxied_path}"
+    if parsed.query:
+        target += f'?{parsed.query}'
+    if parsed.fragment:
+        target += f'#{parsed.fragment}'
+    return target
 
 def _base():
     return settings.SWF_MONITOR_URL.rstrip('/')
@@ -107,16 +130,21 @@ def proxy(request, path, service_user=None):
                 status=405, content_type='application/json',
             )
 
-        # Upstream redirects can't be safely relayed: we'd need to rewrite
-        # the Location across the path prefix and across auth domains
-        # (swf-monitor's /accounts/login/ has no analogue on devcloud). The
-        # original blank-page bug came from passing 302+empty-body+no-Location
-        # straight to the browser. Anonymous browser traffic to protected
-        # views is now gated by @login_required, so we should never see a
-        # login redirect here. If something else upstream starts redirecting,
-        # surface it loudly rather than render a blank page.
+        # Normal form POSTs redirect back to another proxied page. Rewrite
+        # those known local paths across the mount boundary. Authentication
+        # and foreign redirects remain unforwardable: swf-monitor's login and
+        # auth domains have no devcloud analogue.
         if 300 <= resp.status_code < 400:
             loc = resp.headers.get('location', '<no Location>')
+            local_loc = _local_redirect_location(loc)
+            if local_loc:
+                logger.info(
+                    f"Rewriting upstream redirect {resp.status_code} from "
+                    f"{url}: {loc} → {local_loc}"
+                )
+                redirected = HttpResponse(status=resp.status_code)
+                redirected['Location'] = local_loc
+                return redirected
             logger.warning(
                 f"Unforwardable upstream redirect {resp.status_code} from "
                 f"{url} → {loc}"
