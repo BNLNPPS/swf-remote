@@ -57,6 +57,10 @@
     {% block extra_head %}{% endblock %}
 </head>
 <body>
+    {# SYNC OBLIGATION: this nav mirrors swf-monitor's production nav
+       (swf-monitor src/templates/base.html, nav block) and must be updated
+       whenever that nav changes. The monitor side carries the matching
+       sync-obligation comment pointing here. #}
     {% with url_name=request.resolver_match.url_name|default:'' %}
     <nav>
         <div class="dropdown" id="mode-flipper">
@@ -85,13 +89,28 @@
         </div>
 
         <a href="{% url 'monitor_app:pcs_catalog' %}" class="{% if url_name == 'pcs_catalog' %}nav-active{% endif %}">Campaigns</a>
+        <div class="dropdown">
+            <button class="dropbtn">AI</button>
+            <div class="dropdown-content">
+                <a href="{% url 'monitor_app:ai_proxy_all' %}assessments/">Assessments</a>
+                <a href="{% url 'monitor_app:ai_proxy_all' %}proposals/">Proposals</a>
+            </div>
+        </div>
         <strong class="nav-label nav-panda-label">PanDA</strong>
         <a href="{% url 'monitor_app:panda_activity' %}" class="{% if url_name == 'panda_activity' %}nav-active{% endif %}">Activity</a>
         <a href="{% url 'monitor_app:panda_tasks_list' %}" class="{% if 'panda_task' in url_name %}nav-active{% endif %}">Tasks</a>
         <a href="{% url 'monitor_app:panda_jobs_list' %}" class="{% if 'panda_job' in url_name %}nav-active{% endif %}">Jobs</a>
         <a href="{% url 'monitor_app:panda_errors_list' %}" class="{% if 'panda_errors' in url_name %}nav-active{% endif %}">Errors</a>
+        <a href="{% url 'monitor_app:logs_proxy_all' %}?app_name=epicprod" class="{% if 'logs' in url_name %}nav-active{% endif %}">Logs</a>
+        <a href="{% url 'monitor_app:alarms_dashboard' %}" class="{% if 'alarms' in url_name %}nav-active{% endif %}">Alarms</a>
         <a href="{% url 'monitor_app:panda_diagnostics_list' %}" class="{% if 'panda_diagnostics' in url_name %}nav-active{% endif %}">Diagnostics</a>
-        <a href="{% url 'monitor_app:epic_queues_list' %}" class="{% if 'epic_queue' in url_name %}nav-active{% endif %}">Queues</a>
+        <div class="dropdown">
+            <button class="dropbtn{% if 'epic_queue' in url_name or 'compute_usage' in url_name %} nav-active{% endif %}">Sites</button>
+            <div class="dropdown-content">
+                <a href="{% url 'monitor_app:compute_usage_proxy_all' %}">Site usage</a>
+                <a href="{% url 'monitor_app:epic_queues_list' %}" class="{% if 'epic_queue' in url_name %}nav-active{% endif %}">PanDA queues</a>
+            </div>
+        </div>
 
         <span class="nav-spacer"></span>
         <a href="{% url 'monitor_app:about' %}">About</a>

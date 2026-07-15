@@ -20,3 +20,11 @@ Sister project to swf-monitor, swf-testbed, swf-common-lib.
 
 Follow swf-monitor conventions: python-decouple, single settings.py, same
 URL structure under /panda/.
+
+## Nav sync obligation
+
+The nav in `src/templates/base.html` mirrors swf-monitor's production nav
+(swf-monitor `src/templates/base.html`) and must be updated whenever that
+nav changes. Both nav blocks carry matching sync-obligation comments
+pointing at each other. Local pages render this nav; proxied pages carry
+swf-monitor's own — drift shows up as inconsistent menus between them.

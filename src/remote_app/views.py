@@ -49,7 +49,10 @@ def logout_view(request):
 
 @login_required
 def account(request):
-    return render(request, 'monitor_app/account.html')
+    """Proxy the unified username page (My Workflows | Account tabs) from
+    swf-monitor. The local password_change endpoint stays native — the
+    unified page's tunnel-face password section links to it."""
+    return monitor_client.proxy(request, request.path_info)
 
 
 def about(request):
