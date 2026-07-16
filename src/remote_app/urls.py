@@ -104,6 +104,8 @@ urlpatterns = [
     # for rollback/reference, but serve these paths through the proxy.
     path('alarms/', views.alarms_proxy, name='alarms_dashboard'),
     re_path(r'^alarms/.+', views.alarms_proxy, name='alarms_proxy_all'),
+    path('analysis/', views.analysis_proxy, name='analysis'),
+    re_path(r'^analysis/.+', views.analysis_proxy, name='analysis_proxy_all'),
 
     # Static assets — proxy from swf-monitor so CSS/JS stays in sync
     path('static/<path:path>', views.static_proxy, name='static_proxy'),

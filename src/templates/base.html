@@ -11,6 +11,7 @@
     <style>
       nav { display: flex; align-items: center; gap: .8em; padding: .5em 1em; background: #222; position: sticky; top: 0; z-index: 1030; }
       .nav-spacer { flex: 1 1 auto; }
+      .nav-analysis { margin-left: 1.5em; }
       .nav-auth { display: flex; gap: 1em; align-items: center; }
       nav a, .dropbtn { color: #ADD8E6; text-decoration: none; }
       nav a:hover { text-decoration: underline; }
@@ -111,6 +112,7 @@
                 <a href="{% url 'monitor_app:epic_queues_list' %}" class="{% if 'epic_queue' in url_name %}nav-active{% endif %}">PanDA queues</a>
             </div>
         </div>
+        <a href="{% url 'monitor_app:analysis' %}" class="nav-analysis{% if 'analysis' in url_name %} nav-active{% endif %}">Analysis</a>
 
         <span class="nav-spacer"></span>
         <a href="{% url 'monitor_app:about' %}">About</a>

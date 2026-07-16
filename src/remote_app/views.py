@@ -229,6 +229,12 @@ def sse_proxy(request):
 
 
 @csrf_exempt
+def analysis_proxy(request, **kwargs):
+    """Proxy analysis pages from swf-monitor."""
+    return monitor_client.proxy(request, request.path_info)
+
+
+@csrf_exempt
 def alarms_proxy(request, **kwargs):
     """Proxy alarm pages to swf-monitor.
 
