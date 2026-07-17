@@ -107,6 +107,11 @@ urlpatterns = [
     path('analysis/', views.analysis_proxy, name='analysis'),
     re_path(r'^analysis/.+', views.analysis_proxy, name='analysis_proxy_all'),
 
+    # Snapper coherent operational state history — proxied from swf-monitor.
+    path('snapper/epicprod/report/', views.snapper_proxy,
+         name='snapper_report'),
+    re_path(r'^snapper/', views.snapper_proxy, name='snapper_proxy_all'),
+
     # Static assets — proxy from swf-monitor so CSS/JS stays in sync
     path('static/<path:path>', views.static_proxy, name='static_proxy'),
 

@@ -115,7 +115,15 @@
         <a href="{% url 'monitor_app:analysis' %}" class="nav-analysis{% if 'analysis' in url_name %} nav-active{% endif %}">Analysis</a>
 
         <span class="nav-spacer"></span>
-        <a href="{% url 'monitor_app:about' %}">About</a>
+        <div class="dropdown">
+            <button class="dropbtn{% if 'snapper' in url_name or url_name == 'about' %} nav-active{% endif %}">System</button>
+            <div class="dropdown-content">
+                <a href="{% url 'monitor_app:snapper_report' %}"
+                   class="{% if 'snapper' in url_name %}nav-active{% endif %}">Snapper</a>
+                <a href="{% url 'monitor_app:about' %}"
+                   class="{% if url_name == 'about' %}nav-active{% endif %}">About</a>
+            </div>
+        </div>
         {% include 'monitor_app/_nav_auth.html' %}
     </nav>
     {% endwith %}

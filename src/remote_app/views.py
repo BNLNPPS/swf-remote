@@ -234,6 +234,11 @@ def analysis_proxy(request, **kwargs):
     return monitor_client.proxy(request, request.path_info)
 
 
+def snapper_proxy(request, **kwargs):
+    """Proxy Snapper report and system pages from swf-monitor."""
+    return monitor_client.proxy(request, request.path_info)
+
+
 @csrf_exempt
 def alarms_proxy(request, **kwargs):
     """Proxy alarm pages to swf-monitor.

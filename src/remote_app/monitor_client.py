@@ -26,7 +26,9 @@ UPSTREAM_HEADERS = {'Host': 'pandaserver02.sdcc.bnl.gov'}
 # (devcloud) URLs, not upstream BNL URLs. Devcloud has its own user table.
 NAV_AUTH_RE = re.compile(rb'<div class="nav-auth">.*?</div>', re.DOTALL)
 
-PROXIED_REDIRECT_ROOTS = ('/pcs/', '/panda/', '/ai/', '/logs/', '/alarms/')
+PROXIED_REDIRECT_ROOTS = (
+    '/pcs/', '/panda/', '/ai/', '/logs/', '/alarms/', '/snapper/',
+)
 
 
 def _local_redirect_location(location):

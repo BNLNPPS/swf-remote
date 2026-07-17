@@ -47,6 +47,8 @@ Browser → epic-devcloud.org (Django/Apache)
 | `/panda/tasks/<taskid>/` | Task detail with constituent jobs |
 | `/panda/errors/` | Error summary — top patterns ranked by frequency |
 | `/panda/diagnostics/` | Failed jobs with full error details |
+| `/snapper/<scope>/report/` | Coherent operational state snaps and history |
+| `/snapper/<scope>/system/` | Snapper capture policy, scheduler, and component registry |
 
 ## Setup
 
