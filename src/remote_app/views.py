@@ -239,6 +239,11 @@ def snapper_proxy(request, **kwargs):
     return monitor_client.proxy(request, request.path_info)
 
 
+def canary_proxy(request, **kwargs):
+    """Proxy the Canary site-health page from swf-monitor."""
+    return monitor_client.proxy(request, request.path_info)
+
+
 @csrf_exempt
 def alarms_proxy(request, **kwargs):
     """Proxy alarm pages to swf-monitor.

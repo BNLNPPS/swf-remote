@@ -112,6 +112,10 @@ urlpatterns = [
          name='snapper_report'),
     re_path(r'^snapper/', views.snapper_proxy, name='snapper_proxy_all'),
 
+    # site-canary site health — proxied from swf-monitor.
+    path('canary/', views.canary_proxy, name='canary_page'),
+    re_path(r'^canary/.+', views.canary_proxy, name='canary_proxy_all'),
+
     # Static assets — proxy from swf-monitor so CSS/JS stays in sync
     path('static/<path:path>', views.static_proxy, name='static_proxy'),
 
