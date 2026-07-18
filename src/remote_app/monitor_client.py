@@ -25,6 +25,10 @@ UPSTREAM_HEADERS = {'Host': 'pandaserver02.sdcc.bnl.gov'}
 # rendered fragment so account/login/logout actions resolve to swf-remote
 # (devcloud) URLs, not upstream BNL URLs. Devcloud has its own user table.
 NAV_AUTH_RE = re.compile(rb'<div class="nav-auth">.*?</div>', re.DOTALL)
+ABSOLUTE_URL_RE = re.compile(rb'https?://[^\s"\'<>]+')
+
+UPSTREAM_ROOT = b'/swf-monitor/'
+PRESERVED_UPSTREAM_ROOT = b'/\x00SWF_MONITOR_ROOT\x00/'
 
 PROXIED_REDIRECT_ROOTS = (
     '/pcs/', '/panda/', '/ai/', '/logs/', '/alarms/', '/snapper/',
@@ -40,7 +44,11 @@ def _local_redirect_location(location):
     if not parsed.path.startswith(upstream_prefix + '/'):
         return ''
     proxied_path = parsed.path[len(upstream_prefix):]
-    if not proxied_path.startswith(PROXIED_REDIRECT_ROOTS):
+    if proxied_path.startswith('/prod/'):
+        # The upstream production namespace is the devcloud mount root:
+        # /swf-monitor/prod/X -> /prod/X, not /prod/prod/X.
+        proxied_path = proxied_path[len('/prod'):]
+    elif not proxied_path.startswith(PROXIED_REDIRECT_ROOTS):
         return ''
     target = f"{(settings.FORCE_SCRIPT_NAME or '').rstrip('/')}{proxied_path}"
     if parsed.query:
@@ -48,6 +56,28 @@ def _local_redirect_location(location):
     if parsed.fragment:
         target += f'#{parsed.fragment}'
     return target
+
+
+def _rewrite_upstream_paths(body):
+    """Map relative swf-monitor paths onto the local devcloud mount.
+
+    Absolute URLs are references to their named host and must remain intact;
+    in particular, a GitHub repository named ``swf-monitor`` is not an
+    upstream application path. The upstream ``prod/`` namespace is already
+    represented by devcloud's ``/prod`` mount and is therefore collapsed.
+    """
+    prefix = (settings.FORCE_SCRIPT_NAME or '').rstrip('/').encode()
+    local_root = prefix + b'/'
+
+    def preserve_absolute(match):
+        return match.group(0).replace(
+            UPSTREAM_ROOT, PRESERVED_UPSTREAM_ROOT)
+
+    body = ABSOLUTE_URL_RE.sub(preserve_absolute, body)
+    body = body.replace(b'/swf-monitor/prod/', local_root)
+    body = body.replace(UPSTREAM_ROOT, local_root)
+    return body.replace(PRESERVED_UPSTREAM_ROOT, UPSTREAM_ROOT)
+
 
 def _base():
     return settings.SWF_MONITOR_URL.rstrip('/')
@@ -164,10 +194,8 @@ def proxy(request, path, service_user=None):
         # /swf-monitor/X → {SCRIPT_NAME}/X (e.g. /prod/X)
         # Preserve absolute URLs to external hosts (e.g. pandaserver02).
         prefix = (settings.FORCE_SCRIPT_NAME or '').encode()
-        if b'/swf-monitor/' in body:
-            body = body.replace(b'.gov/swf-monitor/', b'.gov/\x00SWF_PRESERVE\x00/')
-            body = body.replace(b'/swf-monitor/', prefix + b'/')
-            body = body.replace(b'.gov/\x00SWF_PRESERVE\x00/', b'.gov/swf-monitor/')
+        if UPSTREAM_ROOT in body:
+            body = _rewrite_upstream_paths(body)
         # Force production mode — devcloud has no testbed toggle
         if b'navMode' in body:
             body = body.replace(
