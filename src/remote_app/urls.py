@@ -116,6 +116,15 @@ urlpatterns = [
     path('canary/', views.canary_proxy, name='canary_page'),
     re_path(r'^canary/.+', views.canary_proxy, name='canary_proxy_all'),
 
+    # Testbed runs and workflow executions — drilldown targets of the
+    # Snapper Time history; proxied from swf-monitor.
+    path('runs/', views.runs_proxy, name='runs_list'),
+    re_path(r'^runs/.+', views.runs_proxy, name='runs_proxy_all'),
+    path('workflow-executions/', views.workflow_executions_proxy,
+         name='workflow_executions_list'),
+    re_path(r'^workflow-executions/.+', views.workflow_executions_proxy,
+            name='workflow_executions_proxy_all'),
+
     # Static assets — proxy from swf-monitor so CSS/JS stays in sync
     path('static/<path:path>', views.static_proxy, name='static_proxy'),
 
@@ -127,4 +136,9 @@ urlpatterns = [
     # explicitly above. See ../CLAUDE.md and swf-monitor/docs/SSE_PUSH.md.
     re_path(r'^panda/', views.panda_proxy, name='panda_proxy_all'),
     re_path(r'^pcs/', views.pcs_proxy, name='pcs_proxy_all'),
+
+    # Absolute last: any path this proxy does not carry gets a plain
+    # statement that the page lives on the internal monitor, with the
+    # direct pandaserver02 URL — never a bare dead 404.
+    re_path(r'^.*$', views.internal_only, name='internal_only'),
 ]

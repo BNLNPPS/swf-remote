@@ -244,6 +244,45 @@ def canary_proxy(request, **kwargs):
     return monitor_client.proxy(request, request.path_info)
 
 
+def runs_proxy(request, **kwargs):
+    """Proxy testbed run pages from swf-monitor."""
+    return monitor_client.proxy(request, request.path_info)
+
+
+def workflow_executions_proxy(request, **kwargs):
+    """Proxy testbed workflow-execution pages from swf-monitor."""
+    return monitor_client.proxy(request, request.path_info)
+
+
+def internal_only(request, **kwargs):
+    """Friendly terminus for any path this proxy does not carry.
+
+    A swf-monitor page without a proxy route used to die as a bare 404
+    here; instead, say plainly that the page lives on the internal
+    monitor and hand over the direct URL for anyone inside the BNL
+    perimeter.
+    """
+    from django.http import HttpResponse
+    from django.utils.html import escape
+
+    path = request.path_info.lstrip('/')
+    query = request.META.get('QUERY_STRING') or ''
+    internal_url = ('https://pandaserver02.sdcc.bnl.gov/swf-monitor/'
+                    + path + (f'?{query}' if query else ''))
+    body = f"""
+    <div style="max-width:44rem; margin:5rem auto; font-size:1.15rem;
+                font-family:system-ui,sans-serif; line-height:1.55;
+                padding:0 1rem;">
+      <h1 style="font-size:1.5rem;">Internal monitor page</h1>
+      <p>This page is not served on the external face. It is available on
+         the internal SWF monitor, reachable from inside the BNL network
+         with BNL authentication:</p>
+      <p><a href="{escape(internal_url)}">{escape(internal_url)}</a></p>
+      <p><a href="/prod/">Back to the external monitor</a></p>
+    </div>"""
+    return HttpResponse(body, status=404)
+
+
 @csrf_exempt
 def alarms_proxy(request, **kwargs):
     """Proxy alarm pages to swf-monitor.
