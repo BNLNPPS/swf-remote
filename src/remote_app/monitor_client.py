@@ -21,6 +21,41 @@ logger = logging.getLogger(__name__)
 TIMEOUT = 30
 UPSTREAM_HEADERS = {'Host': 'pandaserver02.sdcc.bnl.gov'}
 
+# Crawlers are denied the entire proxied surface, not just the robots.txt
+# disallow list: GPTBot crawled /pcs/ at ~80k requests/day for five days
+# after the Disallow shipped, so compliance cannot be assumed and every
+# crawler hit costs a full page render on swf-monitor through the tunnel.
+CRAWLER_UA_TOKENS = (
+    'GoogleOther',
+    'Googlebot',
+    'Google-Extended',
+    'GPTBot',
+    'ChatGPT-User',
+    'OAI-SearchBot',
+    'ClaudeBot',
+    'Claude-User',
+    'anthropic-ai',
+    'PerplexityBot',
+    'CCBot',
+    'DotBot',
+    'SemrushBot',
+    'Baiduspider',
+    'Amazonbot',
+)
+
+
+def crawler_denial(request):
+    """Return a 403 HttpResponse if the request is from a known crawler,
+    else None."""
+    ua = request.META.get('HTTP_USER_AGENT', '')
+    if any(token.lower() in ua.lower() for token in CRAWLER_UA_TOKENS):
+        return HttpResponse(
+            'Automated crawlers may not access this site.\n',
+            status=403,
+            content_type='text/plain',
+        )
+    return None
+
 # Replace upstream's <div class="nav-auth">...</div> block with a locally-
 # rendered fragment so account/login/logout actions resolve to swf-remote
 # (devcloud) URLs, not upstream BNL URLs. Devcloud has its own user table.
@@ -133,6 +168,9 @@ def proxy(request, path, service_user=None):
     user is authenticated. Use for service-to-service endpoints that the
     upstream requires IsAuthenticated on (e.g. /api/panda/* viewsets).
     """
+    denial = crawler_denial(request)
+    if denial is not None:
+        return denial
     url = f"{_base()}{path}"
     params = request.GET.dict()
     headers = dict(UPSTREAM_HEADERS)

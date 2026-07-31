@@ -12,24 +12,7 @@ from django.shortcuts import redirect, render
 from django.views.decorators.csrf import csrf_exempt
 
 from . import monitor_client
-
-CRAWLER_UA_TOKENS = (
-    'GoogleOther',
-    'Googlebot',
-    'Google-Extended',
-    'GPTBot',
-    'ChatGPT-User',
-    'OAI-SearchBot',
-    'ClaudeBot',
-    'Claude-User',
-    'anthropic-ai',
-    'PerplexityBot',
-    'CCBot',
-    'DotBot',
-    'SemrushBot',
-    'Baiduspider',
-    'Amazonbot',
-)
+from .monitor_client import CRAWLER_UA_TOKENS
 
 
 # ── Auth ─────────────────────────────────────────────────────────────────────
