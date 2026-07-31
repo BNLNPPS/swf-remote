@@ -1,6 +1,2 @@
 User-agent: *
-Disallow: /prod/panda/jobs/*/payload-log/
-Disallow: /prod/pcs/
-
-User-agent: Google-Extended
 Disallow: /
