@@ -21,10 +21,11 @@ logger = logging.getLogger(__name__)
 TIMEOUT = 30
 UPSTREAM_HEADERS = {'Host': 'pandaserver02.sdcc.bnl.gov'}
 
-# Crawlers are denied the entire proxied surface, not just the robots.txt
-# disallow list: GPTBot crawled /pcs/ at ~80k requests/day for five days
-# after the Disallow shipped, so compliance cannot be assumed and every
-# crawler hit costs a full page render on swf-monitor through the tunnel.
+# Crawlers are denied the entire proxied surface rather than trusted to
+# honor robots.txt: every crawler hit costs a full page render on
+# swf-monitor through the tunnel (GPTBot alone reached ~80k requests/day,
+# July 2026), and a wrong-path Disallow went unnoticed for five days —
+# the block must not depend on the disallow list being right.
 CRAWLER_UA_TOKENS = (
     'GoogleOther',
     'Googlebot',
