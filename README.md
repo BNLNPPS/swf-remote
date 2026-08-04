@@ -49,6 +49,7 @@ Browser → epic-devcloud.org (Django/Apache)
 | `/panda/diagnostics/` | Failed jobs with full error details |
 | `/snapper/<scope>/report/` | Coherent operational state snaps and history |
 | `/snapper/<scope>/system/` | Snapper capture policy, scheduler, and component registry |
+| `/system/` | Aggregate SWF system health |
 
 ## Setup
 

@@ -7,7 +7,7 @@ Sister project to swf-monitor, swf-testbed, swf-common-lib.
 
 ## Architecture
 
-- **Web pages**: most (hub, PanDA, PCS, Alarms) are full rendered HTML proxied from
+- **Web pages**: most (hub, PanDA, PCS, Alarms, System) are full rendered HTML proxied from
   swf-monitor via monitor_client.proxy(), with swf-monitor URLs rewritten to
   local /prod/ paths. Only account and auth pages render locally with
   swf-remote's own base.html. Old local alarm code remains for

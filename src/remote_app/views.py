@@ -222,6 +222,11 @@ def snapper_proxy(request, **kwargs):
     return monitor_client.proxy(request, request.path_info)
 
 
+def system_proxy(request):
+    """Proxy the aggregate swf-monitor System page."""
+    return monitor_client.proxy(request, '/system/')
+
+
 def canary_proxy(request, **kwargs):
     """Proxy the Canary site-health page from swf-monitor."""
     return monitor_client.proxy(request, request.path_info)

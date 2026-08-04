@@ -112,6 +112,9 @@ urlpatterns = [
          name='snapper_report'),
     re_path(r'^snapper/', views.snapper_proxy, name='snapper_proxy_all'),
 
+    # Aggregate SWF system health — destination of the Capcom swf-system tile.
+    path('system/', views.system_proxy, name='system'),
+
     # site-canary site health — proxied from swf-monitor.
     path('canary/', views.canary_proxy, name='canary_page'),
     re_path(r'^canary/.+', views.canary_proxy, name='canary_proxy_all'),
@@ -145,6 +148,6 @@ urlpatterns = [
     re_path(r'^(workflow|workflows|workflow-definitions|stf-files'
             r'|tf-slices|fastmon-files|namespaces|subscribers|dashboard'
             r'|database|idds-database|panda-database|panda-queues'
-            r'|persistent-state|rucio-endpoints|epicprod|system)(/|$)',
+            r'|persistent-state|rucio-endpoints|epicprod)(/|$)',
             views.internal_only, name='internal_only'),
 ]
