@@ -133,3 +133,24 @@ CAPCOM reports a warning or failure when any of the following occurs:
 Traffic signatures remain useful for identifying concealed crawlers and for
 forensic drilldown. They are an observation and alerting mechanism under this
 policy, rather than the primary control protecting live data construction.
+
+## Contingency protection for cached anonymous traffic
+
+Anonymous access to the cached public surface does not require a challenge
+while its measured resource cost remains acceptable. If Snapper observations
+show that anonymous crawling of cached responses materially burdens
+swf-remote, the tunnel, or swf-monitor, [Anubis](https://github.com/TecharoHQ/anubis)
+is the preferred contingency at the public ingress.
+
+Anubis uses an automatic JavaScript proof-of-work challenge and a signed pass
+cookie. It requires little user interaction but adds an ingress service,
+policy, signing-key, state, and monitoring burden. If deployed, it applies to
+anonymous traffic only; authenticated users and authenticated service
+identities bypass it. Static assets, health endpoints, crawler policy files,
+and the login path remain reachable without the challenge.
+
+Deployment is triggered by sustained evidence that cached anonymous traffic
+itself is costly, rather than by the presence of a concealed crawler alone.
+Anubis does not replace the cache contract: anonymous requests remain unable to
+run live computation or refresh caches. It also does not replace traffic
+observation, because a client capable of solving the challenge may still pass.
