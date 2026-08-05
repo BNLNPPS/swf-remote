@@ -9,6 +9,7 @@ Two modes:
 
 import logging
 import re
+import uuid
 from urllib.parse import urlsplit
 
 import httpx
@@ -30,18 +31,52 @@ CRAWLER_UA_TOKENS = (
     'GoogleOther',
     'Googlebot',
     'Google-Extended',
+    'Google-CloudVertexBot',
+    'bingbot',
+    'Applebot',
+    'DuckDuckBot',
+    'DuckAssistBot',
+    'YandexBot',
+    'PetalBot',
+    'Bytespider',
     'GPTBot',
     'ChatGPT-User',
     'OAI-SearchBot',
     'ClaudeBot',
+    'Claude-SearchBot',
     'Claude-User',
     'anthropic-ai',
     'PerplexityBot',
+    'Perplexity-User',
     'CCBot',
     'DotBot',
     'SemrushBot',
+    'AhrefsBot',
+    'MJ12bot',
+    'BLEXBot',
+    'DataForSeoBot',
     'Baiduspider',
     'Amazonbot',
+    'FacebookBot',
+    'facebookexternalhit',
+    'meta-externalagent',
+    'meta-externalfetcher',
+    'Twitterbot',
+    'LinkedInBot',
+    'Slackbot',
+    'Discordbot',
+    'TelegramBot',
+    'archive.org_bot',
+    'ia_archiver',
+    'Sogou',
+    'Exabot',
+    'Qwantbot',
+    'YouBot',
+    'cohere-ai',
+    'Diffbot',
+    'ImagesiftBot',
+    'MauiBot',
+    'SeznamBot',
 )
 
 
@@ -119,6 +154,37 @@ def _base():
     return settings.SWF_MONITOR_URL.rstrip('/')
 
 
+def _safe_header(value, limit=512):
+    """Return a bounded printable-ASCII value for a tunnel header."""
+    return re.sub(r'[^\x20-\x7e]', '?', str(value or ''))[:limit]
+
+
+def _proxy_headers(request, service_user=None):
+    """Build the trusted identity and correlation headers for swf-monitor."""
+    headers = dict(UPSTREAM_HEADERS)
+    if hasattr(request, 'user') and request.user.is_authenticated:
+        headers['X-Remote-User'] = request.user.username
+        headers['X-Remote-Access'] = 'user'
+    elif service_user:
+        # Some read-open APIs require an upstream compatibility identity. It
+        # does not turn the originating anonymous browser into an authenticated
+        # user for live-data/cache policy decisions.
+        headers['X-Remote-User'] = service_user
+        headers['X-Remote-Access'] = 'anonymous'
+    else:
+        headers['X-Remote-Access'] = 'anonymous'
+
+    request_id = getattr(request, 'swf_request_id', '') or uuid.uuid4().hex
+    source_id = getattr(request, 'swf_source_id', '')
+    headers['X-Remote-Request-ID'] = _safe_header(request_id, 64)
+    if source_id:
+        headers['X-Remote-Client'] = _safe_header(source_id, 64)
+    user_agent = request.META.get('HTTP_USER_AGENT', '')
+    if user_agent:
+        headers['X-Remote-User-Agent'] = _safe_header(user_agent)
+    return headers
+
+
 def stream_sse(request, path):
     """Stream an SSE endpoint from swf-monitor to the caller without buffering.
 
@@ -130,7 +196,7 @@ def stream_sse(request, path):
     never a silent dead stream. See swf-monitor/docs/SSE_PUSH.md.
     """
     url = f"{_base()}{path}"
-    headers = dict(UPSTREAM_HEADERS)
+    headers = _proxy_headers(request)
     if getattr(settings, 'SWF_MONITOR_TOKEN', ''):
         headers['Authorization'] = f"Token {settings.SWF_MONITOR_TOKEN}"
     # read timeout > the relay's ~30s heartbeat: a healthy stream never trips it,
@@ -174,13 +240,7 @@ def proxy(request, path, service_user=None):
         return denial
     url = f"{_base()}{path}"
     params = request.GET.dict()
-    headers = dict(UPSTREAM_HEADERS)
-
-    # Pass authenticated user identity for attribution on swf-monitor
-    if hasattr(request, 'user') and request.user.is_authenticated:
-        headers['X-Remote-User'] = request.user.username
-    elif service_user:
-        headers['X-Remote-User'] = service_user
+    headers = _proxy_headers(request, service_user=service_user)
 
     method = request.method.upper()
     try:

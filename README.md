@@ -109,6 +109,13 @@ sudo systemctl status swf-remote-tunnel
 Environment variables prefixed `SWF_REMOTE_` to avoid collisions with
 other apps on the same server. See `.env.example`.
 
+## Live-data access
+
+Public users receive cached monitoring information; current information and
+cache refreshes require an authenticated Django account. The cross-component
+policy and its CAPCOM and Snapper observability are defined in
+[Live-data access and public cache policy](docs/live-data-access.md).
+
 ## Local vs proxied pages
 
 Most pages — the hub, all PanDA views, Alarms, and all PCS views — are served as
