@@ -47,6 +47,9 @@ MIDDLEWARE = [
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
     'swf_remote_project.expire_old_cookies.ExpireOldCookiesMiddleware',
     'allauth.account.middleware.AccountMiddleware',
+    # After AuthenticationMiddleware and allauth, so request.user is populated
+    # and the auth flows themselves are reachable.
+    'swf_remote_project.login_wall.LoginWallMiddleware',
 ]
 
 ROOT_URLCONF = 'swf_remote_project.urls'

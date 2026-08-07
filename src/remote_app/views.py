@@ -53,6 +53,12 @@ def home(request):
 
 
 def prod_home(request):
+    # Anonymous visitors get a local page instead of the proxied hub, so the
+    # site's front door costs nothing upstream and liveness pollers still see
+    # a 200. See swf_remote_project/login_wall.py.
+    if not request.user.is_authenticated:
+        from django.shortcuts import render
+        return render(request, 'landing.html')
     return monitor_client.proxy(request, '/prod/')
 
 
