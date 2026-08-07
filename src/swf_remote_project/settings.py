@@ -103,6 +103,13 @@ SESSION_COOKIE_PATH = _subpath or "/"
 CSRF_COOKIE_NAME = 'csrftoken_prod'
 SESSION_COOKIE_NAME = 'sessionid_prod'
 
+# Rolling session window: each request pushes expiry back out to
+# SESSION_COOKIE_AGE, so someone who keeps using the site stays signed in and
+# only genuine inactivity expires them. Django writes the session row only
+# when the session is non-empty, so anonymous traffic costs no write.
+# Expired rows are not reaped automatically; clearsessions handles that.
+SESSION_SAVE_EVERY_REQUEST = True
+
 # Behind Apache reverse proxy
 USE_X_FORWARDED_HOST = True
 SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
