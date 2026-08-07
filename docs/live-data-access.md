@@ -31,6 +31,21 @@ Authenticated users are not subject to a traffic limit unless observed use
 shows that one is needed. The existing exclusions for self-identified crawlers
 remain in place as an inexpensive first filter.
 
+## Establishing an account
+
+An account may be established either by a local username and password or by
+signing in with GitHub, which creates the Django account on first use so that
+collaborators need no provisioned credential. Both carry the same authority.
+
+Membership of the `eic` GitHub organization is not a condition of signing in.
+Authentication alone supplies the protection the policy needs, because a
+crawler does not complete an OAuth flow, whereas an organization test would
+exclude collaborators who do not use GitHub.
+
+Signing in confers no privilege beyond an ordinary account. What it supplies
+is an identity that persists across requests — the thing the cache contract
+distinguishes on, and the thing anonymous traffic cannot present.
+
 ## Cache contract
 
 The cache may remain in swf-monitor. A cached database read and response render
@@ -70,8 +85,8 @@ anonymous response.
 
 ### swf-remote
 
-- Authenticates Django users and forwards only locally established user
-  identity to swf-monitor.
+- Authenticates Django users, by local credential or GitHub sign-in, and
+  forwards only locally established user identity to swf-monitor.
 - Rejects known self-identified crawlers before proxying.
 - Preserves the anonymous, authenticated-user, and authenticated-service
   distinction across the proxy boundary.

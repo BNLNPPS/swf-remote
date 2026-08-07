@@ -1,0 +1,12 @@
+{% extends "base.html" %}
+
+{% comment %}
+allauth ships its own complete HTML document as this layout, with a bare
+unstyled menu, so its pages arrive without the site's nav or styling.
+Extending base.html instead puts every allauth page — third-party signup,
+account connections, authentication errors — inside the same chrome as the
+rest of the site. allauth's pages fill the content block, which base.html
+already wraps in <main>, so no additional wrapper is needed here.
+{% endcomment %}
+
+{% block title %}{% block head_title %}Account{% endblock %} — ePIC Production Monitor{% endblock %}

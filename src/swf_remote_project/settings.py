@@ -21,8 +21,20 @@ INSTALLED_APPS = [
     'django.contrib.messages',
     'django.contrib.staticfiles',
     'django.contrib.humanize',
+    'allauth',
+    'allauth.account',
+    'allauth.socialaccount',
+    # GitHub is the only provider. allauth calls this package family
+    # "socialaccount"; that is its name for third-party OAuth, not an
+    # indication that any consumer identity provider is enabled. A provider
+    # absent from INSTALLED_APPS has no URL and no code path.
+    'allauth.socialaccount.providers.github',
     'remote_app',
 ]
+
+# django.contrib.sites is deliberately absent: allauth treats it as optional
+# and resolves the host from the request, so the provider credentials live in
+# settings rather than in a database row that has to be kept in step.
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
@@ -34,6 +46,7 @@ MIDDLEWARE = [
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
     'swf_remote_project.expire_old_cookies.ExpireOldCookiesMiddleware',
+    'allauth.account.middleware.AccountMiddleware',
 ]
 
 ROOT_URLCONF = 'swf_remote_project.urls'
@@ -99,6 +112,50 @@ SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 LOGIN_URL = 'login'
 LOGIN_REDIRECT_URL = 'monitor_app:prod_home'
 LOGOUT_REDIRECT_URL = 'monitor_app:home'
+
+AUTHENTICATION_BACKENDS = [
+    'django.contrib.auth.backends.ModelBackend',
+    'allauth.account.auth_backends.AuthenticationBackend',
+]
+
+# GitHub sign-in. An account is created on first sign-in, so collaborators
+# need no locally provisioned username or password. Signing in confers no
+# privilege beyond an ordinary account: it establishes an identity that
+# outlives a request, which anonymous traffic cannot supply. Cache policy is
+# enforced upstream in swf-monitor — see docs/live-data-access.md.
+SOCIALACCOUNT_ONLY = False
+SOCIALACCOUNT_AUTO_SIGNUP = True
+# Signing in with GitHub on an address that already has an account signs into
+# that account and links it, rather than stopping at a signup form. The match
+# is against verified EmailAddress rows, so an account is reachable this way
+# only once it has been marked verified — see docs/live-data-access.md.
+SOCIALACCOUNT_EMAIL_AUTHENTICATION = True
+SOCIALACCOUNT_EMAIL_AUTHENTICATION_AUTO_CONNECT = True
+SOCIALACCOUNT_EMAIL_REQUIRED = False
+# Must be set explicitly: it otherwise follows EMAIL_REQUIRED above, and when
+# off the provider's /user/emails call is skipped entirely. Without that call
+# no address arrives marked verified, and email authentication — which
+# considers verified provider addresses only — can never match an account.
+SOCIALACCOUNT_QUERY_EMAIL = True
+SOCIALACCOUNT_EMAIL_VERIFICATION = 'none'
+ACCOUNT_EMAIL_VERIFICATION = 'none'
+# Provider sign-in is reached by POST from the login page, so a third party
+# cannot start the flow with a bare link.
+SOCIALACCOUNT_LOGIN_ON_GET = False
+SOCIALACCOUNT_PROVIDERS = {
+    'github': {
+        'APP': {
+            'client_id': config('SWF_REMOTE_GITHUB_CLIENT_ID', default=''),
+            'secret': config('SWF_REMOTE_GITHUB_SECRET', default=''),
+            'key': '',
+        },
+        # Identity only. read:org would be required to check eic membership,
+        # which is deliberately not a condition of signing in. user:email is
+        # what makes GitHub report whether an address is verified, which
+        # email authentication requires before it will match an account.
+        'SCOPE': ['read:user', 'user:email'],
+    },
+}
 
 # swf-monitor REST base URL (via SSH tunnel to pandaserver02)
 SWF_MONITOR_URL = config('SWF_REMOTE_MONITOR_URL', default='https://localhost:18443/swf-monitor')

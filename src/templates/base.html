@@ -58,10 +58,15 @@
     {% block extra_head %}{% endblock %}
 </head>
 <body>
-    {# SYNC OBLIGATION: this nav mirrors swf-monitor's production nav
-       (swf-monitor src/templates/base.html, nav block) and must be updated
-       whenever that nav changes. The monitor side carries the matching
-       sync-obligation comment pointing here. #}
+    {% comment %}
+    SYNC OBLIGATION: this nav mirrors swf-monitor's production nav
+    (swf-monitor src/templates/base.html, nav block) and must be updated
+    whenever that nav changes. The monitor side carries the matching
+    sync-obligation comment pointing here.
+
+    Keep this in a comment tag, not hash-brace: Django strips hash-brace
+    comments only when they sit on one line, and renders them otherwise.
+    {% endcomment %}
     {% with url_name=request.resolver_match.url_name|default:'' %}
     <nav>
         <div class="dropdown" id="mode-flipper">
