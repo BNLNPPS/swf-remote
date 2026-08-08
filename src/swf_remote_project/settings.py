@@ -131,8 +131,8 @@ AUTHENTICATION_BACKENDS = [
 # GitHub sign-in. An account is created on first sign-in, so collaborators
 # need no locally provisioned username or password. Signing in confers no
 # privilege beyond an ordinary account: it establishes an identity that
-# outlives a request, which anonymous traffic cannot supply. Cache policy is
-# enforced upstream in swf-monitor — see docs/live-data-access.md.
+# outlives a request, which anonymous traffic cannot supply. Access policy is
+# enforced in login_wall.py — see docs/live-data-access.md.
 SOCIALACCOUNT_ONLY = False
 SOCIALACCOUNT_AUTO_SIGNUP = True
 # Signing in with GitHub on an address that already has an account signs into

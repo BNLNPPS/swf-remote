@@ -1,39 +1,49 @@
-# Live-data access and public cache policy
+# Live-data access policy
 
 ## Purpose
 
-`epic-devcloud.org` provides open access to ePIC monitoring information while
-the authoritative monitoring application and its data sources run on protected
-infrastructure. Some automated clients conceal their identity, ignore crawler
-exclusions, and traverse many expensive monitor pages concurrently. An
-anonymous crawl must not be able to trigger enough live work to exhaust the
-swf-monitor WSGI pool.
+`epic-devcloud.org` publishes ePIC monitoring information from outside BNL,
+while the authoritative monitoring application and its data sources run on
+protected infrastructure inside it. Every `/prod/` page is rendered by
+swf-monitor and retrieved over the SSH tunnel, so serving a page costs an
+upstream page build on `pandaserver02`.
 
-The access policy separates public visibility from data freshness. Public users
-can read cached monitoring information without an account. Current information
-and cache refreshes require an authenticated Django account.
+Automated clients conceal their identity, ignore crawler exclusions, and
+traverse expensive pages concurrently. One such client enumerated the PCS
+physics facet space — tens of thousands of distinct filter combinations, no
+two alike — at more than one request per second, exhausting the swf-remote
+WSGI pool and, through the shared Apache instance, the unrelated service at
+`/doc/`. Address-based blocking did not reach it: the client moved to a
+residential proxy network presenting one request per exit address.
+
+Access therefore depends on identity rather than on traffic signatures. A
+request that cannot present an account does not reach the tunnel.
 
 ## Access policy
 
-Requests fall into three classes:
+Signing in is required for every proxied surface: HTML pages, DataTables
+requests, JSON endpoints, filter counts, and the REST proxies. Protecting only
+the initial HTML response would be insufficient, because a page issues further
+requests after it loads.
 
-- **Authenticated users** may request current information. Their requests may
-  run live queries, rebuild cached material, and replace the public cached
-  result.
-- **Anonymous users** may receive an existing cached result. Their requests
-  must never populate or refresh a cache or execute the expensive data assembly
-  that the cache protects.
-- **Machine clients** that require current information use an authenticated
-  service identity. Fixed health and status clients must not depend on a
-  User-Agent allowlist for authorization.
+Three paths remain open without an account:
 
-Authenticated users are not subject to a traffic limit unless observed use
-shows that one is needed. The existing exclusions for self-identified crawlers
-remain in place as an inexpensive first filter.
+- the login page and the GitHub authorization callback, under `/accounts/`;
+- static assets, which are proxied and whose absence leaves the login page
+  unstyled;
+- the landing page at `/prod/`, which is rendered locally rather than proxied.
+
+The landing page identifies the service and offers sign-in. Because it is
+local, an anonymous visitor — including a crawler — costs nothing upstream,
+and liveness pollers that watch `/prod/` continue to receive a 200 response.
+
+Machine clients that require current information use an authenticated service
+identity. Authorization does not depend on a User-Agent allowlist. Signed-in
+users are not rate-limited unless observed use shows a need.
 
 ## Establishing an account
 
-An account may be established either by a local username and password or by
+An account is established either by a local username and password or by
 signing in with GitHub, which creates the Django account on first use so that
 collaborators need no provisioned credential. Both carry the same authority.
 
@@ -42,130 +52,90 @@ Authentication alone supplies the protection the policy needs, because a
 crawler does not complete an OAuth flow, whereas an organization test would
 exclude collaborators who do not use GitHub.
 
-Signing in confers no privilege beyond an ordinary account. What it supplies
-is an identity that persists across requests — the thing the cache contract
-distinguishes on, and the thing anonymous traffic cannot present.
+A GitHub identity whose verified address matches an existing account signs
+into that account and links the two, instead of creating a second one. The
+match is against verified `EmailAddress` records, with a fallback to the user
+record's own address. Two accounts carrying one address are disambiguated by
+the verified record. This requires `SOCIALACCOUNT_QUERY_EMAIL`: it otherwise
+follows `SOCIALACCOUNT_EMAIL_REQUIRED`, and while off the provider's
+`/user/emails` call is skipped, so no address arrives marked verified and no
+account can be matched.
 
-## Cache contract
+## Sessions
 
-The cache may remain in swf-monitor. A cached database read and response render
-is substantially less expensive than rebuilding a PCS or PanDA page. Moving
-the cache to swf-remote is not required unless measured cached-response load
-later shows a need for it.
-
-Each cacheable request follows this contract:
-
-1. An authenticated request may compute a current result and update the cache.
-2. An anonymous cache hit returns the stored result without starting live work.
-3. An anonymous request for a stale result receives that result with a visible
-   data timestamp. Staleness does not authorize a refresh.
-4. An anonymous cache miss receives a concise explanation and a login link. It
-   does not cause cache population.
-
-Freshness and retention are separate. A result may become stale while remaining
-available for anonymous use. Cache expiry must therefore not silently remove
-the last usable public result when the intended behavior is to serve it as
-stale.
-
-The policy applies to all expensive read surfaces, including HTML pages,
-DataTables requests, JSON endpoints, filter counts, and other browser-initiated
-requests. Protecting only the initial HTML response is insufficient because a
-cached page may issue additional live requests after loading.
-
-Cache keys must be bounded and canonical. Arbitrary query parameters must not
-create new anonymous cache entries or turn a cache miss into live work. Each
-cacheable route defines the query parameters that are part of its public cache
-identity.
-
-Authenticated or personalized content must never be exposed through the public
-cache. A public cached representation contains only material suitable for an
-anonymous response.
+A session lasts 14 days and the window rolls: each request extends expiry, so
+continued use keeps a person signed in and only inactivity ends the session.
+Django writes the session record only when the session is non-empty, so
+anonymous traffic adds no database write. Expired records are not reaped
+automatically; `manage.py clearsessions` removes them.
 
 ## Component responsibilities
 
 ### swf-remote
 
+- Enforces the policy, in `swf_remote_project/login_wall.py`. Enforcement
+  belongs here because a request refused at this boundary never crosses the
+  tunnel, whereas the same rule applied upstream would admit the traffic
+  before rejecting it.
+- Runs the check as middleware. `remote_app/urls.py` ends in catch-all proxy
+  routes so that new swf-monitor pages need no route definition here; a
+  per-view decorator would leave each of them unprotected.
 - Authenticates Django users, by local credential or GitHub sign-in, and
   forwards only locally established user identity to swf-monitor.
-- Rejects known self-identified crawlers before proxying.
-- Preserves the anonymous, authenticated-user, and authenticated-service
-  distinction across the proxy boundary.
-- Adds trusted tunnel metadata for traffic correlation:
-  `X-Remote-Access`, `X-Remote-Request-ID`, `X-Remote-Client`, and
-  `X-Remote-User-Agent`. The anonymous client identifier is a signed
-  observability cookie and grants no access.
-- Presents login links and cache status consistently in proxied responses.
+- Adds trusted tunnel metadata for traffic correlation: `X-Remote-Access`,
+  `X-Remote-Request-ID`, `X-Remote-Client`, and `X-Remote-User-Agent`. The
+  anonymous client identifier is a signed observability cookie and grants no
+  access.
 
 ### swf-monitor
 
-- Owns the expensive page and data construction paths and their caches.
-- Enforces cached-only access for anonymous proxy requests.
-- Allows authenticated users and service identities to refresh cached data.
-- Retains the last usable public result when it is allowed to be served stale.
-- Publishes cache and request observations for operational monitoring.
+- Owns the expensive page and data construction paths.
+- Establishes user identity from `X-Remote-User`, through
+  `TunnelAuthMiddleware`, and treats a request without that header as
+  anonymous. Tunnel metadata is trusted only on localhost requests arriving
+  through the SSH tunnel. `X-Remote-Access` carries the classification;
+  `X-Remote-User` alone establishes identity.
+- Needs no change for this policy. Its own users, reaching it directly inside
+  the firewall, are unaffected.
 
-Tunnel metadata is trusted only on localhost requests arriving through the SSH
-tunnel. `X-Remote-User` remains the sole proxy header that establishes a Django
-user identity. `X-Remote-Access` is the cache-policy classification. An
-anonymous read-open API request remains `anonymous` even when swf-remote must
-provide a compatibility service username to an upstream API that requires
-authentication.
+## Observability
 
-### TJAI CAPCOM
+A Snapper `traffic` scope records anonymous and authenticated request rates,
+policy denials, upstream concurrency, response size, route-family fan-out, and
+crawler exclusions. Time cuts provide source, account or anonymous identity,
+User-Agent, route family, and requested-path drilldown.
 
-A dedicated `swf-traffic` state reports whether the access policy is operating
-normally. Its compact status includes current upstream activity, anonymous
-cache behavior, live refresh activity, and recent policy violations or
-failures. The tile links to the Snapper traffic report.
+A CAPCOM `swf-traffic` state reports whether the policy is operating normally,
+linking to the Snapper traffic report. The policy is healthy when no anonymous
+request reaches a proxied surface and upstream concurrency stays below the
+capacity signed-in users require.
 
-### Snapper
+## Public cached access
 
-A `traffic` scope records and displays:
+Anonymous access to cached monitoring information, rather than to nothing, is
+a possible later relaxation. It would return an existing cached result to an
+anonymous request while reserving live computation and cache refreshes to
+signed-in users, and would restore public visibility of monitoring
+information without restoring the load that made sign-in necessary.
 
-- anonymous and authenticated request rates;
-- cache hits, stale responses, and misses;
-- authenticated refresh counts and durations;
-- current and maximum upstream concurrency;
-- response size and route-family fan-out;
-- crawler exclusions and access-policy denials.
+It depends on conditions that do not hold today. The cache would have to cover
+the expensive surfaces rather than selected products, cache keys would have to
+be bounded and canonical so that arbitrary query parameters cannot create
+entries or turn a miss into live work, expiry would have to retain the last
+usable public result for stale service, and no authenticated or personalized
+content could enter a public cached representation. Enforcement would move to
+swf-monitor, which owns the caches, at the cost of admitting the traffic to
+the tunnel before answering it.
 
-Time cuts provide source, account or anonymous identity, User-Agent, route
-family, and requested-path drilldown. This history determines whether cached
-anonymous traffic remains inexpensive and whether additional protection is
-needed.
+## Contingency for anonymous load
 
-## Operational conditions
-
-The policy is healthy when anonymous live refreshes remain zero and upstream
-concurrency stays below the WSGI capacity required for authenticated users.
-CAPCOM reports a warning or failure when any of the following occurs:
-
-- an anonymous request reaches a live computation path;
-- cache misses or refresh failures make public information unavailable;
-- upstream concurrency approaches saturation;
-- traffic observation or cache-policy reporting is unavailable.
-
-Traffic signatures remain useful for identifying concealed crawlers and for
-forensic drilldown. They are an observation and alerting mechanism under this
-policy, rather than the primary control protecting live data construction.
-
-## Contingency protection for cached anonymous traffic
-
-Anonymous access to the cached public surface does not require a challenge
-while its measured resource cost remains acceptable. If Snapper observations
-show that anonymous crawling of cached responses materially burdens
-swf-remote, the tunnel, or swf-monitor, [Anubis](https://github.com/TecharoHQ/anubis)
-is the preferred contingency at the public ingress.
-
-Anubis uses an automatic JavaScript proof-of-work challenge and a signed pass
-cookie. It requires little user interaction but adds an ingress service,
-policy, signing-key, state, and monitoring burden. If deployed, it applies to
-anonymous traffic only; authenticated users and authenticated service
-identities bypass it. Static assets, health endpoints, crawler policy files,
-and the login path remain reachable without the challenge.
-
-Deployment is triggered by sustained evidence that cached anonymous traffic
-itself is costly, rather than by the presence of a concealed crawler alone.
-Anubis does not replace the cache contract: anonymous requests remain unable to
-run live computation or refresh caches. It also does not replace traffic
-observation, because a client capable of solving the challenge may still pass.
+The landing page is local and inexpensive, so anonymous traffic no longer
+reaches the tunnel regardless of volume. If anonymous request volume later
+burdens swf-remote or the ingress itself,
+[Anubis](https://github.com/TecharoHQ/anubis) is the preferred contingency at
+the public ingress. It applies an automatic JavaScript proof-of-work challenge
+and a signed pass cookie, requiring little user interaction but adding an
+ingress service, policy, signing key, state, and monitoring burden. It would
+apply to anonymous traffic only; signed-in users and service identities bypass
+it, and static assets, health endpoints, crawler policy files, and the login
+path remain reachable without the challenge.

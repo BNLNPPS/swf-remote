@@ -111,12 +111,13 @@ other apps on the same server. See `.env.example`.
 
 ## Live-data access
 
-Public users receive cached monitoring information; current information and
-cache refreshes require an authenticated Django account. An account is
-established either by a local username and password or by signing in with
-GitHub, which creates it on first use; `eic` organization membership is not
-required. The cross-component policy and its CAPCOM and Snapper observability
-are defined in [Live-data access and public cache policy](docs/live-data-access.md).
+Every proxied page is built by swf-monitor and fetched over the tunnel, so
+viewing one requires an account. Anonymous visitors reach a locally rendered
+landing page, the login path, and static assets; everything else redirects to
+sign-in. An account is established either by a local username and password or
+by signing in with GitHub, which creates it on first use; `eic` organization
+membership is not required. The cross-component policy is defined in
+[Live-data access policy](docs/live-data-access.md).
 
 ## Local vs proxied pages
 
