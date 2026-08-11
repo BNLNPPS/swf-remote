@@ -147,6 +147,10 @@ def _rewrite_upstream_paths(body):
     body = ABSOLUTE_URL_RE.sub(preserve_absolute, body)
     body = body.replace(b'/swf-monitor/prod/', local_root)
     body = body.replace(UPSTREAM_ROOT, local_root)
+    # Django's JS-string escaping renders the hyphen as the unicode
+    # escape sequence u002D inside <script> contexts (e.g. the schema
+    # URL Swagger UI fetches), which the plain byte pattern misses.
+    body = body.replace(UPSTREAM_ROOT.replace(b'-', b'\\u002D'), local_root)
     return body.replace(PRESERVED_UPSTREAM_ROOT, UPSTREAM_ROOT)
 
 
