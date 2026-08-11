@@ -191,6 +191,18 @@ def pcs_api_proxy(request, path):
     return monitor_client.proxy(request, f'/pcs/api/{path}')
 
 
+def schema_proxy(request):
+    """Proxy the OpenAPI schema and its Swagger UI / Redoc renderers.
+
+    Read-only documentation pages (swf-epicprod API_DOCUMENTATION.md); the
+    sidecar-served UI assets arrive through the existing static proxy after
+    path rewriting.
+    """
+    if request.method != 'GET':
+        return JsonResponse({'error': 'GET only'}, status=405)
+    return monitor_client.proxy(request, request.path_info)
+
+
 def panda_api_proxy(request, path):
     """Proxy PanDA REST API requests to swf-monitor /api/panda/<path>.
 

@@ -94,6 +94,8 @@ urlpatterns = [
     # PCS REST API (catch-all proxy for DRF endpoints)
     path('pcs/api/<path:path>', views.pcs_api_proxy, name='pcs_api_proxy'),
 
+    # OpenAPI schema + Swagger UI / Redoc (read-only documentation pages)
+    re_path(r'^api/schema/', views.schema_proxy, name='schema_proxy'),
     # PanDA REST API (read-only JSON; catch-all proxy for DRF endpoints)
     path('api/panda/<path:path>', views.panda_api_proxy, name='panda_api_proxy'),
 

@@ -29,6 +29,9 @@ class LoginWallMiddleware:
         # read-only completion/catalog GETs, and the validation-results POST
         # whose token is validated upstream by swf-monitor.
         '/pcs/api/v1/',
+        # REST API documentation (swf-epicprod API_DOCUMENTATION.md): the
+        # OpenAPI schema and its Swagger UI / Redoc renderers, open read-only.
+        '/api/schema/',
     )
     # The landing page: prod_home serves a self-contained local page to
     # anonymous visitors and the proxied hub to everyone else, so it stays
