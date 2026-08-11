@@ -25,6 +25,10 @@ class LoginWallMiddleware:
     OPEN_PREFIXES = (
         '/accounts/',   # login, logout, and the GitHub authorize callback
         '/static/',     # without this the login page renders unstyled
+        # Validation interface (swf-epicprod EPICPROD_VALIDATION.md): open
+        # read-only completion/catalog GETs, and the validation-results POST
+        # whose token is validated upstream by swf-monitor.
+        '/pcs/api/v1/',
     )
     # The landing page: prod_home serves a self-contained local page to
     # anonymous visitors and the proxied hub to everyone else, so it stays

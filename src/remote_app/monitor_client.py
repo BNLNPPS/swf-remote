@@ -241,6 +241,12 @@ def proxy(request, path, service_user=None):
     url = f"{_base()}{path}"
     params = request.GET.dict()
     headers = _proxy_headers(request, service_user=service_user)
+    # Pass a client bearer/token Authorization through for upstream
+    # validation (the validation-results POST authenticates by DRF token
+    # at swf-monitor, not by swf-remote session).
+    auth = request.headers.get('Authorization')
+    if auth:
+        headers['Authorization'] = auth
 
     method = request.method.upper()
     try:

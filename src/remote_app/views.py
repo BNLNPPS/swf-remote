@@ -185,7 +185,8 @@ def pcs_api_proxy(request, path):
     CSRF is exempted here because swf-monitor's API uses token auth,
     not session+CSRF.
     """
-    if request.method != 'GET' and not request.user.is_authenticated:
+    if (request.method != 'GET' and not request.user.is_authenticated
+            and not request.headers.get('Authorization')):
         return JsonResponse({'error': 'Login required'}, status=401)
     return monitor_client.proxy(request, f'/pcs/api/{path}')
 
