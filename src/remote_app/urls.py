@@ -147,9 +147,9 @@ urlpatterns = [
     # monitor, with the direct pandaserver02 URL. Scoped to the
     # monitor's real URL roots — arbitrary junk paths keep the bare 404
     # and never echo an internal URL back to a scanner.
-    re_path(r'^(workflow|workflows|workflow-definitions|stf-files'
+    re_path(r'^(?:workflow|workflows|workflow-definitions|stf-files'
             r'|tf-slices|fastmon-files|namespaces|subscribers|dashboard'
             r'|database|idds-database|panda-database|panda-queues'
-            r'|persistent-state|rucio-endpoints|epicprod)(/|$)',
+            r'|persistent-state|rucio-endpoints|epicprod)(?:/|$)',
             views.internal_only, name='internal_only'),
 ]
