@@ -418,3 +418,41 @@ def list_prod_configs(**kwargs):
 
 def get_prod_config(pk):
     return _get(f'/pcs/api/prod-configs/{pk}/')
+
+
+# ── MCP relay ───────────────────────────────────────────────────────────────
+
+MCP_TIMEOUT = 120
+
+
+def proxy_mcp(request, subpath=''):
+    """Relay one MCP JSON-RPC POST to swf-monitor's MCP endpoint as the
+    signed-in user (docs/live-data-access.md, Tokens).
+
+    The upstream headers are built here rather than copied from the request:
+    the identity and correlation set from _proxy_headers, plus Accept and
+    Content-Type. The caller's Authorization never crosses the tunnel; the
+    monitor accepts the tunnel hop by X-Remote-User. Status and body are
+    returned untouched; the monitor emits external-face URLs for proxied
+    callers, so nothing is rewritten.
+    """
+    url = f"{_base()}/mcp/{subpath}"
+    headers = _proxy_headers(request)
+    headers['Accept'] = request.headers.get('Accept') or 'application/json, text/event-stream'
+    headers['Content-Type'] = request.content_type or 'application/json'
+    try:
+        resp = httpx.post(url, params=request.GET.dict(), content=request.body,
+                          headers=headers, timeout=MCP_TIMEOUT, verify=False)
+    except httpx.ConnectError as e:
+        logger.error(f"Cannot reach swf-monitor MCP at {url}: {e}")
+        return HttpResponse(
+            '{"error": "Cannot reach swf-monitor (tunnel down?)"}',
+            status=502, content_type='application/json',
+        )
+    except Exception as e:
+        logger.error(f"MCP relay to {url} failed: {e}")
+        return HttpResponse(
+            f'{{"error": "{e}"}}', status=502, content_type='application/json',
+        )
+    return HttpResponse(resp.content, status=resp.status_code,
+                        content_type=resp.headers.get('content-type', 'application/json'))

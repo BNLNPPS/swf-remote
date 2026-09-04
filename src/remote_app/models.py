@@ -135,3 +135,26 @@ class EntryVersion(models.Model):
                                     name='uniq_entry_version_num'),
         ]
         indexes = [models.Index(fields=['entry', '-timestamp'])]
+
+
+class ApiToken(models.Model):
+    """A per-user bearer token for headless clients of the MCP relay and the
+    other proxied surfaces (docs/live-data-access.md, Tokens). Only the
+    SHA-256 of the token is stored; the plaintext is shown once at creation.
+    Issued and resolved by remote_app/token_auth.py."""
+
+    id = models.BigAutoField(primary_key=True)
+    user = models.ForeignKey('auth.User', on_delete=models.CASCADE,
+                             related_name='api_tokens')
+    label = models.CharField(max_length=100, blank=True, default='')
+    prefix = models.CharField(max_length=12, db_index=True)  # shown in the UI
+    key_hash = models.CharField(max_length=64, unique=True)
+    created = models.DateTimeField(auto_now_add=True)
+    last_used = models.DateTimeField(null=True, blank=True)
+    revoked = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        db_table = 'api_token'
+
+    def __str__(self):
+        return f'{self.user.username}:{self.prefix}'

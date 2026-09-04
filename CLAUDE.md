@@ -12,7 +12,9 @@ Sister project to swf-monitor, swf-testbed, swf-common-lib.
   local /prod/ paths. Only account and auth pages render locally with
   swf-remote's own base.html. Old local alarm code remains for
   rollback/reference, but live /prod/alarms/ proxies to swf-monitor.
-- **MCP server**: Re-exposes PanDA data for LLM access outside BNL.
+- **MCP relay**: /prod/mcp/ forwards swf-monitor's MCP endpoint through the
+  tunnel as the signed-in user; headless clients use per-user tokens
+  (remote_app/token_auth.py, docs/live-data-access.md).
 - **Data source**: Thin REST endpoints on swf-monitor wrapping panda/queries.py.
 - **No local PanDA data**: All data comes from swf-monitor through the tunnel.
 

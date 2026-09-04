@@ -22,8 +22,9 @@ Browser → epic-devcloud.org (Django/Apache)
   local `/prod/` paths and swaps in local auth controls. Same URL
   structure. Only swf-remote's own pages render locally (see
   *Local vs proxied pages*).
-- **MCP server** (planned) re-exposes PanDA data for LLM access
-  outside BNL, using thin REST endpoints on swf-monitor.
+- **MCP relay** at `/prod/mcp/` forwards swf-monitor's MCP endpoint, its
+  full tool set, through the tunnel as the signed-in user. Headless
+  clients authenticate with a per-user token (see *Live-data access*).
 - **No local PanDA data** — all data comes from swf-monitor in real time.
 
 ## Sister projects
@@ -50,6 +51,8 @@ Browser → epic-devcloud.org (Django/Apache)
 | `/snapper/<scope>/report/` | Coherent operational state snaps and history |
 | `/snapper/<scope>/system/` | Snapper capture policy, scheduler, and component registry |
 | `/system/` | Aggregate SWF system health |
+| `/mcp/` | MCP relay to swf-monitor (POST JSON-RPC; token or session) |
+| `/account/tokens/` | Create and revoke API tokens |
 
 ## Setup
 
@@ -116,7 +119,10 @@ viewing one requires an account. Anonymous visitors reach a locally rendered
 landing page, the login path, and static assets; everything else redirects to
 sign-in. An account is established either by a local username and password or
 by signing in with GitHub, which creates it on first use; `eic` organization
-membership is not required. The cross-component policy is defined in
+membership is not required. A command-line client authenticates with a
+per-user token created on `/prod/account/tokens/` and sent as
+`Authorization: Bearer <token>`; it reaches swf-monitor as that user. The
+cross-component policy is defined in
 [Live-data access policy](docs/live-data-access.md).
 
 ## Local vs proxied pages

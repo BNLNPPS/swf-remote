@@ -42,6 +42,9 @@ MIDDLEWARE = [
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
     'django.contrib.auth.middleware.AuthenticationMiddleware',
+    # Turns an swf-remote bearer token into request.user ahead of the login
+    # wall (remote_app/token_auth.py).
+    'remote_app.token_auth.TokenAuthMiddleware',
     'remote_app.proxy_identity.ProxyIdentityMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',

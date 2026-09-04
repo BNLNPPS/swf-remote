@@ -61,6 +61,22 @@ follows `SOCIALACCOUNT_EMAIL_REQUIRED`, and while off the provider's
 `/user/emails` call is skipped, so no address arrives marked verified and no
 account can be matched.
 
+### Tokens for headless clients
+
+A command-line client such as Claude Code cannot complete a browser sign-in.
+A signed-in person creates a token on the account tokens page
+(`/prod/account/tokens/`); it is shown once and stored as a hash. A request
+carrying `Authorization: Bearer <token>` is authenticated as that person
+before the login wall runs and reaches swf-monitor as that username through
+`X-Remote-User`, exactly as a browser request does. The token never crosses
+the tunnel. Tokens are revoked on the same page.
+
+The MCP relay at `/prod/mcp/` is the intended consumer. It forwards JSON-RPC
+POSTs to swf-monitor's MCP endpoint and refuses an anonymous call with a 401
+rather than a login redirect, so the path is open in the login wall while
+the view itself keeps anonymous traffic off the tunnel. swf-monitor's
+external-access notes describe the contract from its side.
+
 ## Sessions
 
 A session lasts 14 days and the window rolls: each request extends expiry, so
@@ -82,6 +98,9 @@ automatically; `manage.py clearsessions` removes them.
   per-view decorator would leave each of them unprotected.
 - Authenticates Django users, by local credential or GitHub sign-in, and
   forwards only locally established user identity to swf-monitor.
+- Authenticates headless clients by per-user token
+  (`remote_app/token_auth.py`), resolving the token to the same user
+  identity before the wall runs.
 - Adds trusted tunnel metadata for traffic correlation: `X-Remote-Access`,
   `X-Remote-Request-ID`, `X-Remote-Client`, and `X-Remote-User-Agent`. The
   anonymous client identifier is a signed observability cookie and grants no

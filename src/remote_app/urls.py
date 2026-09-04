@@ -9,7 +9,13 @@ urlpatterns = [
     path('prod/', views.prod_home, name='prod_home'),  # alias for backward compat
     path('testbed/', views.testbed_home, name='testbed_home'),
     path('account/', views.account, name='account'),
+    path('account/tokens/', views.account_tokens, name='account_tokens'),
     path('about/', views.about, name='about'),
+
+    # MCP relay to swf-monitor's MCP endpoint: POST JSON-RPC as the signed-in
+    # user or token holder (docs/live-data-access.md, Tokens).
+    path('mcp/', views.mcp_proxy, name='mcp'),
+    path('mcp/<path:subpath>', views.mcp_proxy, name='mcp_sub'),
 
     # epicprod AI pages — proxied from swf-monitor
     re_path(r'^ai/', views.ai_proxy, name='ai_proxy_all'),

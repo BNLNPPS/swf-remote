@@ -1,0 +1,51 @@
+{% extends 'base.html' %}
+
+{% block title %}API tokens — ePIC Production Monitor{% endblock %}
+
+{% block content %}
+<div class="container mt-4" style="max-width: 800px;">
+    <h2 class="mb-3">API tokens</h2>
+    <p>A token lets a command-line client such as Claude Code use the MCP endpoint
+       <code>{{ mcp_url }}</code> as you. Treat it like a password and revoke it here when it is no longer needed.</p>
+
+    {% if new_token %}
+    <div class="alert alert-success">
+        <div class="mb-1">New token, shown once. Copy it now:</div>
+        <code style="font-size: 1.05em; word-break: break-all;">{{ new_token }}</code>
+        <div class="mt-3 mb-1">Claude Code setup:</div>
+        <pre class="mb-0" style="white-space: pre-wrap;">claude mcp add --transport http swf-devcloud {{ mcp_url }} --header "Authorization: Bearer {{ new_token }}"</pre>
+    </div>
+    {% endif %}
+
+    <form method="post" class="d-flex gap-2 mb-4">
+        {% csrf_token %}
+        <input type="text" name="label" class="form-control" placeholder="Label, for example: laptop claude code" maxlength="100" style="max-width: 380px;">
+        <button type="submit" class="btn btn-primary">Create token</button>
+    </form>
+
+    <table class="table table-sm align-middle">
+        <thead><tr><th>Token</th><th>Label</th><th>Created</th><th>Last used</th><th></th></tr></thead>
+        <tbody>
+        {% for t in tokens %}
+            <tr{% if t.revoked %} class="text-muted"{% endif %}>
+                <td><code>swfr_{{ t.prefix }}…</code></td>
+                <td>{{ t.label }}</td>
+                <td>{{ t.created|date:"Y-m-d H:i" }}</td>
+                <td>{% if t.last_used %}{{ t.last_used|date:"Y-m-d H:i" }}{% else %}never{% endif %}</td>
+                <td>
+                    {% if t.revoked %}revoked {{ t.revoked|date:"Y-m-d" }}{% else %}
+                    <form method="post" style="display:inline">{% csrf_token %}
+                        <input type="hidden" name="revoke" value="{{ t.pk }}">
+                        <button type="submit" class="btn btn-outline-danger btn-sm">Revoke</button>
+                    </form>
+                    {% endif %}
+                </td>
+            </tr>
+        {% empty %}
+            <tr><td colspan="5" class="text-muted">No tokens yet.</td></tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    <p class="text-muted">Requests made with a token reach swf-monitor as your username, exactly as browser requests do.</p>
+</div>
+{% endblock %}

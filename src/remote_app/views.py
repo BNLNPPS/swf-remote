@@ -10,6 +10,7 @@ from django.contrib.auth.decorators import login_required
 from django.http import HttpResponse, JsonResponse
 from django.shortcuts import redirect, render
 from django.views.decorators.csrf import csrf_exempt
+from django.views.decorators.http import require_POST
 
 from . import monitor_client
 from .monitor_client import CRAWLER_UA_TOKENS
@@ -363,3 +364,44 @@ def panda_view_text(request):
             # Not a zip, just serve as text
             parts.append(data.decode('utf-8', errors='replace'))
     return HttpResponse(''.join(parts), content_type='text/plain; charset=utf-8')
+
+
+# ── MCP relay and API tokens ─────────────────────────────────────────────────
+
+@csrf_exempt
+@require_POST
+def mcp_proxy(request, subpath=''):
+    """Relay the swf-monitor MCP endpoint (docs/live-data-access.md, Tokens).
+
+    The path is open in the login wall so a headless client receives JSON
+    rather than a login redirect; the caller must still be a signed-in
+    session or hold an swf-remote token, which TokenAuthMiddleware turns
+    into request.user. Anonymous calls stop here and never reach the tunnel.
+    """
+    if not request.user.is_authenticated:
+        return JsonResponse(
+            {'error': 'Authorization required: Bearer <swf-remote token> or a signed-in session'},
+            status=401)
+    return monitor_client.proxy_mcp(request, subpath)
+
+
+@login_required
+def account_tokens(request):
+    """Create and revoke the user's API tokens; a new token is shown once."""
+    from django.urls import reverse
+    from django.utils import timezone
+    from .models import ApiToken
+    from .token_auth import issue_token
+    new_token = None
+    if request.method == 'POST':
+        revoke_id = request.POST.get('revoke', '')
+        if revoke_id.isdigit():
+            ApiToken.objects.filter(user=request.user, pk=int(revoke_id),
+                                    revoked__isnull=True).update(revoked=timezone.now())
+        else:
+            new_token, _ = issue_token(request.user, request.POST.get('label', '').strip())
+    return render(request, 'monitor_app/account_tokens.html', {
+        'tokens': request.user.api_tokens.order_by('-created'),
+        'new_token': new_token,
+        'mcp_url': request.build_absolute_uri(reverse('monitor_app:mcp')),
+    })

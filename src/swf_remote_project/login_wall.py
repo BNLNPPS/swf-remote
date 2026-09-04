@@ -32,6 +32,9 @@ class LoginWallMiddleware:
         # REST API documentation (swf-epicprod API_DOCUMENTATION.md): the
         # OpenAPI schema and its Swagger UI / Redoc renderers, open read-only.
         '/api/schema/',
+        # MCP relay: refuses anonymous calls itself with a 401 so that a
+        # headless client gets JSON, not a login redirect (views.mcp_proxy).
+        '/mcp/',
     )
     # The landing page: prod_home serves a self-contained local page to
     # anonymous visitors and the proxied hub to everyone else, so it stays
