@@ -432,10 +432,16 @@ def proxy_mcp(request, subpath=''):
     The upstream headers are built here rather than copied from the request:
     the identity and correlation set from _proxy_headers, plus Accept and
     Content-Type. The caller's Authorization never crosses the tunnel; the
-    monitor accepts the tunnel hop by X-Remote-User. Status and body are
+    monitor accepts the tunnel hop by X-Remote-User. The tool set is limited
+    to mcp_policy.EXTERNAL_TOOLS: other tools/call names are refused here
+    and tools/list results are filtered. Otherwise status and body are
     returned untouched; the monitor emits external-face URLs for proxied
     callers, so nothing is rewritten.
     """
+    from . import mcp_policy
+    refused = mcp_policy.refuse_call(request.body)
+    if refused is not None:
+        return refused
     url = f"{_base()}/mcp/{subpath}"
     headers = _proxy_headers(request)
     headers['Accept'] = request.headers.get('Accept') or 'application/json, text/event-stream'
@@ -454,5 +460,6 @@ def proxy_mcp(request, subpath=''):
         return HttpResponse(
             f'{{"error": "{e}"}}', status=502, content_type='application/json',
         )
-    return HttpResponse(resp.content, status=resp.status_code,
-                        content_type=resp.headers.get('content-type', 'application/json'))
+    content_type = resp.headers.get('content-type', 'application/json')
+    body = mcp_policy.filter_tools_list(resp.content, content_type)
+    return HttpResponse(body, status=resp.status_code, content_type=content_type)

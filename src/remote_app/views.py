@@ -373,19 +373,20 @@ def mcp_proxy(request, subpath=''):
 
     GET serves the self-contained setup page, locally and to anyone, as
     markdown, or as HTML inside the site nav when the client accepts it.
-    POST is the transport. The path is open in the login wall so a headless
-    client receives JSON rather than a login redirect; a POST caller must
-    still be a signed-in session or hold an swf-remote token, which
-    TokenAuthMiddleware turns into request.user. Anonymous POSTs stop here
-    and never reach the tunnel.
+    POST is the transport and accepts only an swf-remote token, which
+    TokenAuthMiddleware turns into request.user; a browser session is not
+    accepted, so this csrf-exempt POST has no cookie-borne caller. The path
+    is open in the login wall so a headless client receives JSON rather
+    than a login redirect. Calls without a token stop here and never reach
+    the tunnel.
     """
     if request.method == 'GET' and not subpath:
         return mcp_setup(request)
     if request.method != 'POST':
         return HttpResponseNotAllowed(['GET', 'POST'])
-    if not request.user.is_authenticated:
+    if not getattr(request, 'token_auth', False):
         return JsonResponse(
-            {'error': 'Authorization required: Bearer <swf-remote token> or a signed-in session'},
+            {'error': 'Authorization required: Bearer <swf-remote token>; GET this URL for setup'},
             status=401)
     return monitor_client.proxy_mcp(request, subpath)
 

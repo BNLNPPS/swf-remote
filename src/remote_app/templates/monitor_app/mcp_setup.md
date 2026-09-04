@@ -18,7 +18,18 @@ as the person whose token it carries.
    Tools appear in a new session as mcp__swf-devcloud__*, which is also the
    pattern for the permissions allow list. Any MCP client with HTTP transport
    and a custom Authorization header is configured the same way.
-4. Call get_server_instructions first, then swf_list_available_tools.
+4. Call get_server_instructions first; the tools/list result is the catalog.
+
+The external face serves the read-only tools, PanDA production, physics
+configurations, campaigns, operational history, the Rucio catalogs, and AI
+content, plus one write: ai_propose_ping. It creates a proposal, not a
+ping: a dated obligation for the alarm system can be proposed in natural
+language at an LLM command line, and it becomes a ping only when a person
+approves the proposal on the alarm dashboard. Testbed control and
+production writes are not served outside BNL.
+
+What the tools cover, in human terms: the WFMS documentation,
+https://epic-wfms-docs.readthedocs.io/en/latest/apis/#mcp
 
 An assistant performing this setup obtains the token from the person; it is
 not fetchable. A POST without a valid token receives 401. GET returns this

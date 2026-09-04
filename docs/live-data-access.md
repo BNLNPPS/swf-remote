@@ -66,19 +66,40 @@ account can be matched.
 A command-line client such as Claude Code cannot complete a browser sign-in.
 A signed-in person creates a token on the account tokens page
 (`/prod/account/tokens/`); it is shown once and stored as a hash. A request
-carrying `Authorization: Bearer <token>` is authenticated as that person
-before the login wall runs and reaches swf-monitor as that username through
-`X-Remote-User`, exactly as a browser request does. The token never crosses
-the tunnel. Tokens are revoked on the same page.
+to the MCP relay carrying `Authorization: Bearer <token>` is authenticated
+as that person before the login wall runs and reaches swf-monitor as that
+username through `X-Remote-User`, exactly as a browser request does. A
+token is honored nowhere else, so a leaked token is worth the relay's tool
+set and not the account. The token never crosses the tunnel. Tokens are
+revoked on the same page.
 
-The MCP relay at `/prod/mcp/` is the intended consumer. It forwards JSON-RPC
-POSTs to swf-monitor's MCP endpoint and refuses an anonymous call with a 401
-rather than a login redirect, so the path is open in the login wall while
-the view itself keeps anonymous traffic off the tunnel. A GET on the same
+The MCP relay at `/prod/mcp/` is the token's only consumer. It forwards
+JSON-RPC POSTs to swf-monitor's MCP endpoint, accepts a token and not a
+browser session, and refuses a call without one with a 401 rather than a
+login redirect, so the path is open in the login wall while the view itself
+keeps anonymous traffic off the tunnel. A GET on the same
 URL returns a self-contained setup page, rendered locally for anyone, so
 the endpoint address is the only thing a person or their assistant needs to
 be given; the System menu links to it. swf-monitor's external-access notes
 describe the contract from its side.
+
+### External tool set
+
+The relay serves the tools named in `remote_app/mcp_policy.py` and no
+others: a `tools/list` result is filtered to the set, and a `tools/call`
+for any other name is answered with a JSON-RPC error before it crosses the
+tunnel. The set is the read-only tools, PanDA production, PCS reads,
+campaign status and the action stream, Snapper history, the Rucio catalogs,
+and AI content, plus one write, `ai_propose_ping`. It creates a proposal,
+not a ping: a named collaborator anywhere can propose a dated obligation
+in natural language at an LLM command line, and it becomes a ping only
+when a person approves the proposal on the alarm dashboard. Not served: the
+testbed tools, which control and inspect internal processes; the PCS
+intake and lifecycle mutations, which the production bot drives; the
+proposal decision, whose approve executes the proposal; and assessment
+registration, written by the assessment services. A new monitor tool
+reaches the outside only when it is added to the set, the same opt-in
+principle the proxy applies to URLs.
 
 ## Sessions
 
