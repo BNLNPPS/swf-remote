@@ -74,8 +74,11 @@ the tunnel. Tokens are revoked on the same page.
 The MCP relay at `/prod/mcp/` is the intended consumer. It forwards JSON-RPC
 POSTs to swf-monitor's MCP endpoint and refuses an anonymous call with a 401
 rather than a login redirect, so the path is open in the login wall while
-the view itself keeps anonymous traffic off the tunnel. swf-monitor's
-external-access notes describe the contract from its side.
+the view itself keeps anonymous traffic off the tunnel. A GET on the same
+URL returns a self-contained setup page, rendered locally for anyone, so
+the endpoint address is the only thing a person or their assistant needs to
+be given; the System menu links to it. swf-monitor's external-access notes
+describe the contract from its side.
 
 ## Sessions
 

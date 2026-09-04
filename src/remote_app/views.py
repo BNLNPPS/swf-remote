@@ -7,10 +7,9 @@ The hub page is rendered locally (devcloud-specific content).
 
 from django.contrib.auth import logout as auth_logout
 from django.contrib.auth.decorators import login_required
-from django.http import HttpResponse, JsonResponse
+from django.http import HttpResponse, HttpResponseNotAllowed, JsonResponse
 from django.shortcuts import redirect, render
 from django.views.decorators.csrf import csrf_exempt
-from django.views.decorators.http import require_POST
 
 from . import monitor_client
 from .monitor_client import CRAWLER_UA_TOKENS
@@ -369,20 +368,42 @@ def panda_view_text(request):
 # ── MCP relay and API tokens ─────────────────────────────────────────────────
 
 @csrf_exempt
-@require_POST
 def mcp_proxy(request, subpath=''):
     """Relay the swf-monitor MCP endpoint (docs/live-data-access.md, Tokens).
 
-    The path is open in the login wall so a headless client receives JSON
-    rather than a login redirect; the caller must still be a signed-in
-    session or hold an swf-remote token, which TokenAuthMiddleware turns
-    into request.user. Anonymous calls stop here and never reach the tunnel.
+    GET serves the self-contained setup page, locally and to anyone, as
+    markdown, or as HTML inside the site nav when the client accepts it.
+    POST is the transport. The path is open in the login wall so a headless
+    client receives JSON rather than a login redirect; a POST caller must
+    still be a signed-in session or hold an swf-remote token, which
+    TokenAuthMiddleware turns into request.user. Anonymous POSTs stop here
+    and never reach the tunnel.
     """
+    if request.method == 'GET' and not subpath:
+        return mcp_setup(request)
+    if request.method != 'POST':
+        return HttpResponseNotAllowed(['GET', 'POST'])
     if not request.user.is_authenticated:
         return JsonResponse(
             {'error': 'Authorization required: Bearer <swf-remote token> or a signed-in session'},
             status=401)
     return monitor_client.proxy_mcp(request, subpath)
+
+
+def mcp_setup(request):
+    """The MCP setup page: markdown by default, HTML for a browser."""
+    from django.template.loader import render_to_string
+    from django.urls import reverse
+    text = render_to_string('monitor_app/mcp_setup.md', {
+        'mcp_url': request.build_absolute_uri(reverse('monitor_app:mcp')),
+        'site_url': request.build_absolute_uri(reverse('monitor_app:home')),
+        'tokens_url': request.build_absolute_uri(reverse('monitor_app:account_tokens')),
+    })
+    if 'text/html' in request.headers.get('Accept', ''):
+        import markdown
+        return render(request, 'monitor_app/mcp_setup.html',
+                      {'html': markdown.markdown(text)})
+    return HttpResponse(text, content_type='text/markdown; charset=utf-8')
 
 
 @login_required

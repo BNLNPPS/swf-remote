@@ -51,7 +51,7 @@ Browser → epic-devcloud.org (Django/Apache)
 | `/snapper/<scope>/report/` | Coherent operational state snaps and history |
 | `/snapper/<scope>/system/` | Snapper capture policy, scheduler, and component registry |
 | `/system/` | Aggregate SWF system health |
-| `/mcp/` | MCP relay to swf-monitor (POST JSON-RPC; token or session) |
+| `/mcp/` | MCP relay to swf-monitor (POST JSON-RPC; token or session); GET serves the self-contained setup page |
 | `/account/tokens/` | Create and revoke API tokens |
 
 ## Setup

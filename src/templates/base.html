@@ -123,10 +123,15 @@
         <div class="dropdown">
             <button class="dropbtn{% if 'snapper' in url_name or url_name == 'about' %} nav-active{% endif %}">System</button>
             <div class="dropdown-content">
+                <a href="{% url 'monitor_app:panda_proxy_all' %}system/">System Status</a>
                 <a href="{% url 'monitor_app:snapper_report' %}"
                    class="{% if 'snapper' in url_name %}nav-active{% endif %}">Snapper</a>
+                <a href="{% url 'monitor_app:snapper_proxy_all' %}epicprod/platform/">Platform status</a>
+                <a href="{% url 'monitor_app:canary_page' %}probes/">Canary probes</a>
                 <a href="{% url 'monitor_app:about' %}"
                    class="{% if url_name == 'about' %}nav-active{% endif %}">About</a>
+                <a href="{% url 'monitor_app:mcp' %}"
+                   class="{% if url_name == 'mcp' %}nav-active{% endif %}">MCP</a>
             </div>
         </div>
         {% include 'monitor_app/_nav_auth.html' %}
