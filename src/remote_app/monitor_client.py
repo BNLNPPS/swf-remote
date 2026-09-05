@@ -324,7 +324,11 @@ def proxy(request, path, service_user=None):
         if b'pandaserver-doma.cern.ch/trf/' in body:
             body = body.replace(b'href="https://pandaserver-doma.cern.ch/trf/', b'href="' + prefix + b'/panda/view-text/?url=https://pandaserver-doma.cern.ch/trf/')
             body = body.replace(b'href=\\"https://pandaserver-doma.cern.ch/trf/', b'href=\\"' + prefix + b'/panda/view-text/?url=https://pandaserver-doma.cern.ch/trf/')
-        return HttpResponse(body, status=resp.status_code, content_type=ct)
+        response = HttpResponse(body, status=resp.status_code, content_type=ct)
+        # Downloads keep their upstream filename and attachment disposition.
+        if 'content-disposition' in resp.headers:
+            response['Content-Disposition'] = resp.headers['content-disposition']
+        return response
     except httpx.ConnectError as e:
         logger.error(f"Cannot reach swf-monitor at {url}: {e}")
         return HttpResponse(
