@@ -130,10 +130,15 @@ cross-component policy is defined in
 Most pages — the hub, all PanDA views, Alarms, and all PCS views — are served as
 full rendered HTML proxied from swf-monitor (`remote_app/views.py`), so
 they carry swf-monitor's own templates, nav, and styling. swf-remote
-renders a smaller set itself, all using its own `base.html` (the dark nav
-bar): the account page and the login / password-change pages. Alarm code
-from the old local implementation remains in the tree for rollback/reference,
-but live `/prod/alarms/...` pages proxy to swf-monitor.
+renders a smaller set itself using its own `base.html`: the MCP setup page,
+the tokens page, and the login / password-change pages. Their nav is
+swf-monitor's own, taken from the production hub through the tunnel
+(`monitor_client.nav_html`), rewritten to local paths with local auth
+controls like every proxied page, and cached for a minute; the last fetched
+copy stands in during a tunnel outage. swf-remote holds no nav markup, so
+the monitor's nav is the only one. Alarm code from the old local
+implementation remains in the tree for rollback/reference, but live
+`/prod/alarms/...` pages proxy to swf-monitor.
 
 The proxy (`monitor_client.proxy`) preserves swf-monitor's page body and
 `<style>`, rewriting only URLs and the auth controls — so swf-monitor's

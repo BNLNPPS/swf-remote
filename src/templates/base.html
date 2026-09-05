@@ -1,4 +1,4 @@
-{% load static %}
+{% load static monitor_nav %}
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -43,6 +43,13 @@
       .nav-panda-label {
         margin-left: 1.5em;
       }
+      /* The nav is the monitor's own (monitor_client.nav_html); these rules
+         select its production mode, as the monitor's stylesheet does. */
+      .nav-mode { display: none; }
+      .nav-production { display: contents; }
+      #mode-label .mode-title { display: none; }
+      #mode-label .mode-title-production { display: inline; }
+      .nav-system-error { color: #ff8174 !important; font-weight: 700; }
 
       /* PCS canonical Edit button — filled dark green, matches swf-monitor. */
       .btn.btn-dark-green {
@@ -58,84 +65,7 @@
     {% block extra_head %}{% endblock %}
 </head>
 <body>
-    {% comment %}
-    SYNC OBLIGATION: this nav mirrors swf-monitor's production nav
-    (swf-monitor src/templates/base.html, nav block) and must be updated
-    whenever that nav changes. The monitor side carries the matching
-    sync-obligation comment pointing here.
-
-    Keep this in a comment tag, not hash-brace: Django strips hash-brace
-    comments only when they sit on one line, and renders them otherwise.
-    {% endcomment %}
-    {% with url_name=request.resolver_match.url_name|default:'' %}
-    <nav>
-        <div class="dropdown" id="mode-flipper">
-            <button class="dropbtn" id="mode-label">epicprod</button>
-            <div class="dropdown-content">
-                <a href="{% url 'monitor_app:prod_home' %}">epicprod - ePIC Production</a>
-            </div>
-        </div>
-
-        <a href="{% url 'monitor_app:questionnaires_list' %}" class="{% if 'questionnaire' in url_name %}nav-active{% endif %}">Requests</a>
-
-        <div class="dropdown">
-            <button class="dropbtn{% if url_name|slice:':4' == 'pcs_' and url_name != 'pcs_catalog' %} nav-active{% endif %}">PCS</button>
-            <div class="dropdown-content">
-                <a href="{% url 'monitor_app:pcs_hub' %}" class="{% if url_name == 'pcs_hub' %}nav-active{% endif %}">PCS Hub</a>
-                <a href="{% url 'monitor_app:pcs_categories_list' %}" class="{% if url_name == 'pcs_categories_list' %}nav-active{% endif %}">Physics Categories</a>
-                <a href="{% url 'monitor_app:pcs_tag_compose' tag_type='p' %}">Physics Tags</a>
-                <a href="{% url 'monitor_app:pcs_tag_compose' tag_type='e' %}">EvGen Tags</a>
-                <a href="{% url 'monitor_app:pcs_tag_compose' tag_type='s' %}">Simu Tags</a>
-                <a href="{% url 'monitor_app:pcs_tag_compose' tag_type='r' %}">Reco Tags</a>
-                <a href="{% url 'monitor_app:pcs_tag_compose' tag_type='k' %}">Background Tags</a>
-                <a href="{% url 'monitor_app:pcs_datasets_compose' %}" class="{% if url_name == 'pcs_datasets_compose' %}nav-active{% endif %}">Datasets</a>
-                <a href="{% url 'monitor_app:pcs_prod_configs_compose' %}" class="{% if url_name == 'pcs_prod_configs_compose' %}nav-active{% endif %}">Prod Configs</a>
-                <a href="{% url 'monitor_app:pcs_task_compose' %}?tab=tasks" class="{% if url_name == 'pcs_task_compose' %}nav-active{% endif %}">Prod Tasks</a>
-            </div>
-        </div>
-
-        <a href="{% url 'monitor_app:pcs_catalog' %}" class="{% if url_name == 'pcs_catalog' %}nav-active{% endif %}">Campaigns</a>
-        <div class="dropdown">
-            <button class="dropbtn">AI</button>
-            <div class="dropdown-content">
-                <a href="{% url 'monitor_app:ai_proxy_all' %}assessments/">Assessments</a>
-                <a href="{% url 'monitor_app:ai_proxy_all' %}proposals/">Proposals</a>
-            </div>
-        </div>
-        <strong class="nav-label nav-panda-label">PanDA</strong>
-        <a href="{% url 'monitor_app:panda_activity' %}" class="{% if url_name == 'panda_activity' %}nav-active{% endif %}">Activity</a>
-        <a href="{% url 'monitor_app:panda_tasks_list' %}" class="{% if 'panda_task' in url_name %}nav-active{% endif %}">Tasks</a>
-        <a href="{% url 'monitor_app:panda_jobs_list' %}" class="{% if 'panda_job' in url_name %}nav-active{% endif %}">Jobs</a>
-        <a href="{% url 'monitor_app:panda_errors_list' %}" class="{% if 'panda_errors' in url_name %}nav-active{% endif %}">Errors</a>
-        <a href="{% url 'monitor_app:logs_proxy_all' %}?app_name=epicprod" class="{% if 'logs' in url_name %}nav-active{% endif %}">Logs</a>
-        <a href="{% url 'monitor_app:alarms_dashboard' %}" class="{% if 'alarms' in url_name %}nav-active{% endif %}">Alarms</a>
-        <a href="{% url 'monitor_app:panda_diagnostics_list' %}" class="{% if 'panda_diagnostics' in url_name %}nav-active{% endif %}">Diagnostics</a>
-        <div class="dropdown">
-            <button class="dropbtn{% if 'epic_queue' in url_name or 'compute_usage' in url_name %} nav-active{% endif %}">Sites</button>
-            <div class="dropdown-content">
-                <a href="{% url 'monitor_app:compute_usage_proxy_all' %}">Site usage</a>
-                <a href="{% url 'monitor_app:epic_queues_list' %}" class="{% if 'epic_queue' in url_name %}nav-active{% endif %}">PanDA queues</a>
-            </div>
-        </div>
-        <a href="{% url 'monitor_app:analysis' %}" class="nav-analysis{% if 'analysis' in url_name %} nav-active{% endif %}">Analysis</a>
-
-        <span class="nav-spacer"></span>
-        <div class="dropdown">
-            <button class="dropbtn{% if 'snapper' in url_name or url_name == 'about' %} nav-active{% endif %}">System</button>
-            <div class="dropdown-content">
-                <a href="{% url 'monitor_app:panda_proxy_all' %}system/">System Status</a>
-                <a href="{% url 'monitor_app:snapper_report' %}"
-                   class="{% if 'snapper' in url_name %}nav-active{% endif %}">Snapper</a>
-                <a href="{% url 'monitor_app:snapper_proxy_all' %}epicprod/platform/">Platform status</a>
-                <a href="{% url 'monitor_app:canary_page' %}probes/">Canary probes</a>
-                <a href="{% url 'monitor_app:mcp' %}">MCP</a>
-                <a href="{% url 'monitor_app:about' %}"
-                   class="{% if url_name == 'about' %}nav-active{% endif %}">About</a>
-            </div>
-        </div>
-        {% include 'monitor_app/_nav_auth.html' %}
-    </nav>
-    {% endwith %}
+    {% monitor_nav %}
     <main>
         {% block content %}{% endblock %}
     </main>

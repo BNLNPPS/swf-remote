@@ -9,8 +9,8 @@ Sister project to swf-monitor, swf-testbed, swf-common-lib.
 
 - **Web pages**: most (hub, PanDA, PCS, Alarms, System) are full rendered HTML proxied from
   swf-monitor via monitor_client.proxy(), with swf-monitor URLs rewritten to
-  local /prod/ paths. Only account and auth pages render locally with
-  swf-remote's own base.html. Old local alarm code remains for
+  local /prod/ paths. The MCP setup page, the tokens page, and the auth
+  pages render locally with swf-remote's own base.html. Old local alarm code remains for
   rollback/reference, but live /prod/alarms/ proxies to swf-monitor.
 - **MCP relay**: /prod/mcp/ forwards swf-monitor's MCP endpoint through the
   tunnel as the signed-in user; headless clients use per-user tokens
@@ -23,10 +23,10 @@ Sister project to swf-monitor, swf-testbed, swf-common-lib.
 Follow swf-monitor conventions: python-decouple, single settings.py, same
 URL structure under /panda/.
 
-## Nav sync obligation
+## Nav
 
-The nav in `src/templates/base.html` mirrors swf-monitor's production nav
-(swf-monitor `src/templates/base.html`) and must be updated whenever that
-nav changes. Both nav blocks carry matching sync-obligation comments
-pointing at each other. Local pages render this nav; proxied pages carry
-swf-monitor's own — drift shows up as inconsistent menus between them.
+swf-remote holds no nav markup. `base.html` renders `{% monitor_nav %}`,
+which takes the nav element from swf-monitor's production hub through the
+tunnel (`monitor_client.nav_html`), rewritten and with local auth controls
+like every proxied page, cached for a minute. A nav change on the monitor
+appears on every devcloud page without a change here.

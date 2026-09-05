@@ -14,6 +14,7 @@ from urllib.parse import urlsplit
 
 import httpx
 from django.conf import settings
+from django.core.cache import cache
 from django.http import HttpResponse, StreamingHttpResponse
 from django.template.loader import render_to_string
 
@@ -336,6 +337,67 @@ def proxy(request, path, service_user=None):
             f'{{"error": "{e}"}}',
             status=502, content_type='application/json',
         )
+
+
+# ── The monitor's nav for natively rendered pages ───────────────────────────
+#
+# swf-remote holds no nav markup of its own. A page it renders itself
+# (base.html) takes the nav element from the monitor's production hub,
+# fetched through the tunnel with no identity, rewritten like every proxied
+# page, and cached for NAV_TTL seconds. The last fetched copy is kept so a
+# tunnel outage leaves the nav in place. See README, Local vs proxied pages.
+
+NAV_RE = re.compile(rb'<nav>.*?</nav>', re.DOTALL)
+NAV_ACTIVE_RE = re.compile(rb'\s*\bnav-active\b')
+NAV_ONCLICK_RE = re.compile(rb'\s*onclick="[^"]*"')
+NAV_CACHE_KEY = 'monitor_nav'
+NAV_LAST_KEY = 'monitor_nav_last'
+NAV_TTL = 60
+
+
+def _fetch_nav():
+    """Return the monitor hub's nav element with local URLs, or None."""
+    url = f"{_base()}/prod/"
+    headers = dict(UPSTREAM_HEADERS)
+    headers['X-Remote-Access'] = 'anonymous'
+    try:
+        resp = httpx.get(url, timeout=TIMEOUT, verify=False, headers=headers)
+    except Exception as e:
+        logger.error(f"Monitor nav fetch from {url} failed: {e}")
+        return None
+    if resp.status_code != 200:
+        logger.error(f"Monitor nav fetch from {url}: HTTP {resp.status_code}")
+        return None
+    match = NAV_RE.search(resp.content)
+    if not match:
+        logger.error(f"Monitor nav fetch from {url}: no nav element in "
+                     f"{len(resp.content)} bytes")
+        return None
+    nav = _rewrite_upstream_paths(match.group(0))
+    # Active-item marks belong to the hub, and the mode-flip handlers to the
+    # monitor's page script; neither applies on a natively rendered page.
+    nav = NAV_ACTIVE_RE.sub(b'', nav)
+    return NAV_ONCLICK_RE.sub(b'', nav)
+
+
+def nav_html(request):
+    """The nav for a natively rendered page, as bytes: the monitor's nav with
+    swf-remote's auth controls, the same substitution proxied pages get."""
+    nav = cache.get(NAV_CACHE_KEY)
+    if nav is None:
+        nav = _fetch_nav()
+        if nav is not None:
+            cache.set(NAV_CACHE_KEY, nav, NAV_TTL)
+            cache.set(NAV_LAST_KEY, nav, None)
+        else:
+            nav = cache.get(NAV_LAST_KEY)
+    local_auth = render_to_string(
+        'monitor_app/_nav_auth.html', request=request).encode('utf-8')
+    if nav is None:
+        logger.error("Monitor nav unavailable and no earlier copy held; "
+                     "rendering the auth controls alone")
+        return b'<nav><span class="nav-spacer"></span>' + local_auth + b'</nav>'
+    return NAV_AUTH_RE.sub(lambda m: local_auth, nav, count=1)
 
 
 def _get(path, params=None, as_user=None):
