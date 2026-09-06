@@ -16,7 +16,7 @@ state and other things read it.
 Modes:
   drain      receive events, record objects, delete the messages
   reconcile  authoritative count by listing, compared with the index
-  sweep      read failed jobs' reports, keep what is useful, delete them
+  apply      apply the sweeper's spooled pass records to the index
   guard      nightly: is this an explosion, and pull the plug if so
   summary    the state as JSON, for the Capcom tile and for a human
 """
@@ -62,21 +62,17 @@ BYTES_HARD_CEILING_PER_DAY = int(os.environ.get("STAGEOUT_BYTES_HARD",
 RELATIVE_MULTIPLE = int(os.environ.get("STAGEOUT_RELATIVE_MULTIPLE", "20"))
 RELATIVE_FLOOR = int(os.environ.get("STAGEOUT_RELATIVE_FLOOR", "5000"))
 
-# The sweep. Objects are read only for jobs PanDA says failed, and only a
-# bounded number per failure signature: a storm says one thing many
-# thousands of times, and reading it one object at a time buys nothing.
-# Which jobs failed is PanDA's knowledge, on the far side of the
-# perimeter, so the sweep asks the monitor's MCP relay rather than
-# guessing from the reports themselves — a job that dies after writing a
-# healthy report says nothing about its own death.
-SWEEP_CREDENTIAL = os.environ.get(
-    "STAGEOUT_SWEEP_ENV", "/home/admin/.epic-sweep-mcp.env")
-SWEEP_LOOKBACK_DAYS = int(os.environ.get("STAGEOUT_SWEEP_DAYS", "2"))
-SWEEP_KEEP_PER_SIGNATURE = int(os.environ.get("STAGEOUT_SWEEP_KEEP", "5"))
-SWEEP_MAX_READS = int(os.environ.get("STAGEOUT_SWEEP_MAX_READS", "200"))
-# A job's objects are left alone until it has been over for this long, so
-# the sweep never races a job that is still writing.
-SWEEP_MIN_AGE_SECONDS = int(os.environ.get("STAGEOUT_SWEEP_MIN_AGE", "1800"))
+# The sweep runs inside the perimeter, on the production operations agent,
+# because every decision it makes needs the inside: the payload digest,
+# the validation that an id names a real ePIC production job, and the
+# record it files into. It deletes what it takes and reports what it
+# deleted here, since S3 tells a bucket's owner nothing about another
+# party's deletions and a count cannot say which rows to retire.
+PASS_SPOOL = os.environ.get("STAGEOUT_PASS_SPOOL",
+                            "/var/lib/stageout/passes")
+# The sweeper reports hourly. Three missed hours is comfortably clear of one
+# slow pass and still tight against a dead sweeper (agreed 2026-09-06).
+PASS_STALL_SECONDS = int(os.environ.get("STAGEOUT_PASS_STALL", str(3 * 3600)))
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS objects (
@@ -89,17 +85,21 @@ CREATE TABLE IF NOT EXISTS objects (
 CREATE INDEX IF NOT EXISTS objects_seen ON objects (seen_at);
 CREATE INDEX IF NOT EXISTS objects_subject ON objects (subject);
 CREATE TABLE IF NOT EXISTS state (k TEXT PRIMARY KEY, v TEXT NOT NULL);
-CREATE TABLE IF NOT EXISTS reports (
-    pandaid    INTEGER PRIMARY KEY,
-    jeditaskid INTEGER,
-    site       TEXT,
-    endtime    TEXT,
-    report     TEXT NOT NULL,
-    objects    INTEGER NOT NULL,
-    swept_at   REAL NOT NULL,
-    flushed_at REAL
+CREATE TABLE IF NOT EXISTS passes (
+    pass_id      TEXT PRIMARY KEY,
+    reporter     TEXT,
+    outcome      TEXT NOT NULL,
+    reason       TEXT,
+    window_from  TEXT,
+    window_to    TEXT,
+    jobs_filed   INTEGER NOT NULL,
+    keys_read    INTEGER NOT NULL,
+    keys_unread  INTEGER NOT NULL,
+    retired      INTEGER NOT NULL,
+    received_at  TEXT,
+    applied_at   REAL NOT NULL
 );
-CREATE INDEX IF NOT EXISTS reports_flushed ON reports (flushed_at);
+CREATE INDEX IF NOT EXISTS passes_applied ON passes (applied_at);
 CREATE TABLE IF NOT EXISTS daily (
     day       TEXT PRIMARY KEY,
     objects   INTEGER NOT NULL,
@@ -198,6 +198,69 @@ def drain(conn, max_batches=200):
     return recorded, seen
 
 
+def apply_passes(conn):
+    """Apply the sweeper's spooled pass records to the index.
+
+    The sweep runs inside the perimeter and deletes what it has taken, and
+    S3 tells the owner nothing about another party's deletions. So the
+    party that deletes reports it, and this is where those reports land in
+    the index (swf-epicprod docs/JOB_REPORTING.md).
+
+    A record is applied once and its file removed. An unreadable record is
+    moved aside rather than deleted or retried forever: the sweeper treats
+    its 202 as final and will never send it again, so losing it silently
+    would be losing it for good.
+    """
+    if not os.path.isdir(PASS_SPOOL):
+        return {"applied": 0, "retired": 0, "rejected": 0}
+    applied = retired = rejected = 0
+    now = time.time()
+    for name in sorted(os.listdir(PASS_SPOOL)):
+        if not name.endswith(".json"):
+            continue
+        path = os.path.join(PASS_SPOOL, name)
+        try:
+            with open(path) as handle:
+                record = json.load(handle)
+        except (OSError, ValueError) as exc:
+            print(f"unreadable pass record {name}: {exc}", file=sys.stderr)
+            try:
+                os.rename(path, path + ".rejected")
+            except OSError:
+                pass
+            rejected += 1
+            continue
+        keys_read = [k for k in (record.get("deleted_read") or [])
+                     if isinstance(k, str)]
+        keys_unread = [k for k in (record.get("deleted_unread") or [])
+                       if isinstance(k, str)]
+        gone = 0
+        for key in keys_read + keys_unread:
+            gone += conn.execute(
+                "DELETE FROM objects WHERE key = ?", (key,)).rowcount
+        window = record.get("window") or {}
+        conn.execute(
+            "INSERT INTO passes (pass_id, reporter, outcome, reason, "
+            "window_from, window_to, jobs_filed, keys_read, keys_unread, "
+            "retired, received_at, applied_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+            "ON CONFLICT(pass_id) DO NOTHING",
+            (name[:-5], record.get("reporter"), record.get("outcome", "ok"),
+             record.get("reason"), window.get("from"), window.get("to"),
+             len(record.get("filed") or record.get("pandaids") or []),
+             len(keys_read), len(keys_unread), gone,
+             record.get("received_at"), now))
+        conn.commit()
+        os.remove(path)
+        applied += 1
+        retired += gone
+    if applied:
+        set_state(conn, "last_pass_applied", {"at": now, "records": applied,
+                                              "retired": retired})
+        conn.commit()
+    return {"applied": applied, "retired": retired, "rejected": rejected}
+
+
 def reconcile(conn):
     """The nightly cross-check: count the prefix authoritatively and
     compare with the index, then drop rows for objects that are gone.
@@ -292,6 +355,22 @@ def guard(conn, arm=True):
             warnings.append(f"{day_bytes / 1e9:.1f} GB in 24 hours, expected "
                             f"under {BYTES_SOFT_CEILING_PER_DAY / 1e9:.0f} GB")
 
+    # A stalled sweeper is not an explosion. The sweep is the bucket's
+    # normal drain, so when it stops, objects accumulate for a reason that
+    # pulling the write credential would not fix and would make worse: the
+    # jobs would go quiet while the backlog stayed. It gets its own verdict
+    # and never arms the plug.
+    last_pass = conn.execute(
+        "SELECT MAX(applied_at) FROM passes").fetchone()[0]
+    stalled = None
+    if last_pass and now - last_pass > PASS_STALL_SECONDS:
+        stalled = (f"no sweep pass reported for "
+                   f"{(now - last_pass) / 3600:.1f} hours")
+    elif not last_pass and day_objects:
+        stalled = "no sweep pass has ever been reported"
+    if stalled:
+        warnings.append(stalled)
+
     stopped = key_status() == "Inactive"
     if breaches and arm and not stopped:
         disable_reporting_key()
@@ -319,201 +398,10 @@ def guard(conn, arm=True):
                "week_over_week": growth,
                "norm_objects_per_day": round(norm_per_day),
                "breaches": breaches, "warnings": warnings,
+               "sweep_stalled": stalled,
+               "last_pass_at": last_pass,
                "reporting_key_stopped": stopped}
     set_state(conn, "last_guard", outcome)
-    conn.commit()
-    return outcome
-
-
-def _sweep_credential():
-    """The relay URL and bearer token, from the mode-600 environment file."""
-    values = {}
-    with open(SWEEP_CREDENTIAL) as handle:
-        for line in handle:
-            if "=" in line and not line.startswith("#"):
-                key, _, value = line.partition("=")
-                values[key.strip()] = value.strip()
-    url, token = values.get("SWEEP_MCP_URL"), values.get("SWEEP_MCP_TOKEN")
-    if not url or not token:
-        raise RuntimeError(f"{SWEEP_CREDENTIAL} lacks the relay URL or token")
-    return url, token
-
-
-def mcp_call(tool, arguments, timeout=120):
-    """One tool call on the swf-monitor MCP relay, as the service account.
-
-    The relay is how this side of the perimeter asks PanDA anything; it
-    is the same path a person's browser takes, under a token rather than
-    a session.
-    """
-    import urllib.request
-
-    url, token = _sweep_credential()
-    body = json.dumps({"jsonrpc": "2.0", "id": 1, "method": "tools/call",
-                       "params": {"name": tool, "arguments": arguments}})
-    request = urllib.request.Request(
-        url, data=body.encode(), method="POST",
-        headers={"Authorization": f"Bearer {token}",
-                 "Content-Type": "application/json",
-                 "Accept": "application/json, text/event-stream"})
-    with urllib.request.urlopen(request, timeout=timeout) as response:
-        payload = json.loads(response.read().decode())
-    if "error" in payload:
-        raise RuntimeError(f"{tool} failed: {payload['error']}")
-    text = payload["result"]["content"][0]["text"]
-    return json.loads(text)
-
-
-def jobs_by_status(status, days):
-    """PanDA ids in the window with that terminal status, and the
-    attributes the signature and the record need. Paged through the
-    relay's id cursor.
-
-    Status is read positively, never inferred from absence: a job missing
-    from the failed list may have finished, may still be running, or may
-    lie outside the window, and those are not the same thing.
-    """
-    found = {}
-    before_id = None
-    for _ in range(20):
-        arguments = {"status": status, "days": days, "limit": 500}
-        if before_id:
-            arguments["before_id"] = before_id
-        page = mcp_call("panda_list_jobs", arguments)
-        rows = page.get("jobs") or []
-        if not rows:
-            break
-        for row in rows:
-            found[int(row["pandaid"])] = {
-                "jeditaskid": row.get("jeditaskid"),
-                "site": row.get("computingsite"),
-                "endtime": row.get("endtime") or row.get("modificationtime")}
-        before_id = min(int(r["pandaid"]) for r in rows)
-        if len(rows) < 500:
-            break
-    return found
-
-
-def delete_objects(keys):
-    """Delete in batches, the API's own unit, rather than one call each."""
-    deleted = 0
-    for start in range(0, len(keys), 100):
-        batch = keys[start:start + 100]
-        payload = json.dumps(
-            {"Objects": [{"Key": k} for k in batch], "Quiet": True})
-        aws("s3api", "delete-objects", "--bucket", BUCKET,
-            "--delete", payload, parse=False)
-        deleted += len(batch)
-    return deleted
-
-
-def sweep(conn):
-    """Read the objects of failed jobs, keep what is useful, delete them.
-
-    Selective by design: a bounded number of jobs per failure signature
-    are read and stored, and the rest of that signature's objects are
-    deleted unread. The signature is the task and site until the payload
-    digest is available for it; a storm concentrates in both.
-
-    A finished job's objects are deleted the moment this pass learns the
-    job finished. Their usefulness ended at that verdict, and leaving
-    them to the seven-day rule would keep a week of dead weight in the
-    bucket for nothing. Expiry stays as the backstop for jobs this pass
-    could not resolve: still running, or outside the window.
-    """
-    now = time.time()
-    swept_already = {row[0] for row in conn.execute(
-        "SELECT pandaid FROM reports")}
-    # Candidate subjects: numeric ids, quiet long enough to be over.
-    candidates = {}
-    for subject, count, newest in conn.execute(
-            "SELECT subject, COUNT(*), MAX(seen_at) FROM objects "
-            "WHERE subject IS NOT NULL GROUP BY subject"):
-        if not str(subject).isdigit() or int(subject) in swept_already:
-            continue
-        if now - newest < SWEEP_MIN_AGE_SECONDS:
-            continue
-        candidates[int(subject)] = count
-    if not candidates:
-        outcome = {"at": now, "candidates": 0, "read": 0, "stored": 0,
-                   "deleted_unread": 0, "objects_deleted": 0}
-        set_state(conn, "last_sweep", outcome)
-        conn.commit()
-        return outcome
-
-    failed = jobs_by_status("failed", SWEEP_LOOKBACK_DAYS)
-    targets = {pid: failed[pid] for pid in candidates if pid in failed}
-
-    # Finished jobs: nothing to learn, so their objects go now rather
-    # than sitting out the week.
-    finished = jobs_by_status("finished", SWEEP_LOOKBACK_DAYS)
-    finished_deleted = finished_objects = 0
-    for pandaid in candidates:
-        if pandaid in targets or pandaid not in finished:
-            continue
-        keys = [row[0] for row in conn.execute(
-            "SELECT key FROM objects WHERE subject = ?", (str(pandaid),))]
-        if not keys:
-            continue
-        finished_objects += delete_objects(keys)
-        conn.execute("DELETE FROM objects WHERE subject = ?", (str(pandaid),))
-        finished_deleted += 1
-    conn.commit()
-
-    groups = {}
-    for pandaid, attrs in targets.items():
-        groups.setdefault(
-            (attrs["jeditaskid"], attrs["site"]), []).append(pandaid)
-
-    read = stored = unread = objects_deleted = 0
-    for signature, members in groups.items():
-        members.sort()
-        for position, pandaid in enumerate(members):
-            keys = [row[0] for row in conn.execute(
-                "SELECT key FROM objects WHERE subject = ? ORDER BY key",
-                (str(pandaid),))]
-            if not keys:
-                continue
-            keep = (position < SWEEP_KEEP_PER_SIGNATURE
-                    and read < SWEEP_MAX_READS)
-            if keep:
-                # The last object is the most complete account the job
-                # managed to write before it died.
-                try:
-                    text = aws("s3", "cp", f"s3://{BUCKET}/{keys[-1]}", "-",
-                               parse=False)
-                    report = json.loads(text)
-                    read += 1
-                except (RuntimeError, ValueError) as exc:
-                    print(f"unreadable report for {pandaid}: {exc}",
-                          file=sys.stderr)
-                    continue
-                attrs = targets[pandaid]
-                conn.execute(
-                    "INSERT INTO reports (pandaid, jeditaskid, site, endtime, "
-                    "report, objects, swept_at) VALUES (?, ?, ?, ?, ?, ?, ?) "
-                    "ON CONFLICT(pandaid) DO UPDATE SET report = excluded.report",
-                    (pandaid, attrs["jeditaskid"], attrs["site"],
-                     attrs["endtime"], json.dumps(report), len(keys), now))
-                stored += 1
-            else:
-                unread += 1
-            objects_deleted += delete_objects(keys)
-            conn.execute("DELETE FROM objects WHERE subject = ?",
-                         (str(pandaid),))
-            conn.commit()
-
-    outcome = {"at": now, "candidates": len(candidates),
-               "failed_of_those": len(targets), "signatures": len(groups),
-               "read": read, "stored": stored, "deleted_unread": unread,
-               "objects_deleted": objects_deleted,
-               "finished_jobs_cleared": finished_deleted,
-               "finished_objects_deleted": finished_objects,
-               "unresolved": len(candidates) - len(targets) - finished_deleted,
-               "pending_flush": conn.execute(
-                   "SELECT COUNT(*) FROM reports WHERE flushed_at IS NULL"
-               ).fetchone()[0]}
-    set_state(conn, "last_sweep", outcome)
     conn.commit()
     return outcome
 
@@ -562,7 +450,13 @@ def summary(conn):
         "SELECT subject, COUNT(*) c FROM objects WHERE seen_at > ? "
         "GROUP BY subject ORDER BY c DESC LIMIT 1", (now - 86400,)).fetchone()
     last_reconcile = get_state(conn, "last_reconcile", {})
+    last_pass = conn.execute(
+        "SELECT MAX(applied_at) FROM passes").fetchone()[0]
     verdict, detail = "ok", ""
+    if last_pass and now - last_pass > PASS_STALL_SECONDS:
+        verdict = "warning"
+        detail = (f"the sweeper has reported no pass for "
+                  f"{(now - last_pass) / 3600:.1f} hours")
     if hour > RATE_CEILING_PER_HOUR:
         verdict = "alarm"
         detail = f"{hour} objects in the last hour, ceiling {RATE_CEILING_PER_HOUR}"
@@ -581,6 +475,7 @@ def summary(conn):
             + "; ".join(last_guard.get("breaches") or ["stopped by the guard"]))
     return {"objects": total, "last_hour": hour, "last_day": day,
             "guard": last_guard,
+            "last_sweep_pass": last_pass,
             "busiest_subject": busiest[0] if busiest else None,
             "busiest_count": busiest[1] if busiest else 0,
             "rate_ceiling": RATE_CEILING_PER_HOUR,
@@ -593,7 +488,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument(
         "mode",
-        choices=("drain", "reconcile", "sweep", "guard", "summary"))
+        choices=("drain", "reconcile", "apply", "guard", "summary"))
     parser.add_argument("--no-arm", action="store_true",
                         help="report a breach without disabling the key")
     args = parser.parse_args()
@@ -601,11 +496,16 @@ def main():
     try:
         if args.mode == "drain":
             recorded, seen = drain(conn)
-            print(f"drained {seen} messages, recorded {recorded} objects")
+            passes = apply_passes(conn)
+            print(f"drained {seen} messages, recorded {recorded} objects; "
+                  f"applied {passes['applied']} sweep passes retiring "
+                  f"{passes['retired']} objects"
+                  + (f"; {passes['rejected']} rejected"
+                     if passes["rejected"] else ""))
         elif args.mode == "reconcile":
             print(json.dumps(reconcile(conn), indent=2))
-        elif args.mode == "sweep":
-            print(json.dumps(sweep(conn), indent=2))
+        elif args.mode == "apply":
+            print(json.dumps(apply_passes(conn), indent=2))
         elif args.mode == "guard":
             print(json.dumps(guard(conn, arm=not args.no_arm), indent=2))
         else:

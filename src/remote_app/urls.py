@@ -17,6 +17,12 @@ urlpatterns = [
     path('mcp/', views.mcp_proxy, name='mcp'),
     path('mcp/<path:subpath>', views.mcp_proxy, name='mcp_sub'),
 
+    # Stage-out sweep ingest: the production sweeper reports the objects it
+    # deleted so the gateway's index can retire them (swf-epicprod
+    # docs/JOB_REPORTING.md). Token-authenticated, local, never proxied.
+    path('api/stageout/sweep-pass/', views.stageout_sweep_pass,
+         name='stageout_sweep_pass'),
+
     # epicprod AI pages — proxied from swf-monitor
     re_path(r'^ai/', views.ai_proxy, name='ai_proxy_all'),
     re_path(r'^logs/', views.logs_proxy, name='logs_proxy_all'),

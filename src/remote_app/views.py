@@ -5,14 +5,19 @@ Most pages proxy full rendered HTML from swf-monitor through the SSH tunnel.
 The hub page is rendered locally (devcloud-specific content).
 """
 
+import logging
+
 from django.contrib.auth import logout as auth_logout
 from django.contrib.auth.decorators import login_required
 from django.http import HttpResponse, HttpResponseNotAllowed, JsonResponse
 from django.shortcuts import redirect, render
+from django.utils import timezone
 from django.views.decorators.csrf import csrf_exempt
 
 from . import monitor_client
 from .monitor_client import CRAWLER_UA_TOKENS
+
+logger = logging.getLogger(__name__)
 
 
 # ── Auth ─────────────────────────────────────────────────────────────────────
@@ -363,6 +368,92 @@ def panda_view_text(request):
             # Not a zip, just serve as text
             parts.append(data.decode('utf-8', errors='replace'))
     return HttpResponse(''.join(parts), content_type='text/plain; charset=utf-8')
+
+
+# ── Stage-out sweep ingest ───────────────────────────────────────────────────
+
+# The accounts allowed to report a sweep pass. The gateway owns the bucket
+# and its index; the party that deletes objects reports what it deleted
+# (swf-epicprod docs/JOB_REPORTING.md).
+SWEEP_REPORTERS = ('swf-sweeper',)
+SWEEP_SPOOL = '/var/lib/stageout/passes'
+SWEEP_MAX_BYTES = 4 * 1024 * 1024
+
+
+@csrf_exempt
+def stageout_sweep_pass(request):
+    """Accept one sweep pass record from the production sweeper.
+
+    The sweeper on pandaserver02 reads the bucket and deletes what it has
+    taken; this is how the gateway's index learns of those deletions,
+    since S3 tells the owner nothing about them and a count cannot say
+    which rows to retire.
+
+    The record is spooled to disk and applied by the index's own pass, so
+    a 202 means accepted and durable rather than applied. The file is
+    written and flushed before the response, because the sweeper treats a
+    202 as delivered and never re-posts: anything lost after a 202 is lost
+    for good.
+    """
+    import json
+    import os
+    import tempfile
+    import uuid
+
+    if request.method != 'POST':
+        return HttpResponseNotAllowed(['POST'])
+    if not getattr(request, 'token_auth', False):
+        return JsonResponse(
+            {'error': 'Authorization required: Bearer <swf-remote token>'},
+            status=401)
+    if request.user.username not in SWEEP_REPORTERS:
+        return JsonResponse(
+            {'error': f'{request.user.username} may not report sweep passes'},
+            status=403)
+    if len(request.body) > SWEEP_MAX_BYTES:
+        return JsonResponse({'error': 'record too large'}, status=413)
+    try:
+        record = json.loads(request.body)
+    except ValueError as exc:
+        return JsonResponse({'error': f'invalid JSON: {exc}'}, status=400)
+    if not isinstance(record, dict):
+        return JsonResponse({'error': 'record must be an object'}, status=400)
+    outcome = record.get('outcome')
+    if outcome not in ('ok', 'partial', 'failed'):
+        return JsonResponse(
+            {'error': "outcome must be 'ok', 'partial' or 'failed'"},
+            status=400)
+    for field in ('deleted_read', 'deleted_unread'):
+        value = record.get(field, [])
+        if not isinstance(value, list) or any(
+                not isinstance(k, str) for k in value):
+            return JsonResponse(
+                {'error': f'{field} must be a list of object keys'},
+                status=400)
+
+    record['received_at'] = timezone.now().isoformat()
+    record['reporter'] = request.user.username
+    pass_id = str(uuid.uuid4())
+    try:
+        os.makedirs(SWEEP_SPOOL, exist_ok=True)
+        handle, temporary = tempfile.mkstemp(dir=SWEEP_SPOOL, suffix='.tmp')
+        with os.fdopen(handle, 'w') as spooled:
+            json.dump(record, spooled)
+            spooled.flush()
+            os.fsync(spooled.fileno())
+        os.chmod(temporary, 0o660)
+        # Rename last: a reader never sees a partial record.
+        os.rename(temporary, os.path.join(SWEEP_SPOOL, f'{pass_id}.json'))
+    except OSError as exc:
+        logger.error('sweep pass spool failed: %s', exc)
+        return JsonResponse({'error': f'could not spool the record: {exc}'},
+                            status=503)
+    logger.info(
+        'sweep pass %s accepted from %s: outcome=%s read=%d unread=%d',
+        pass_id, request.user.username, outcome,
+        len(record.get('deleted_read') or []),
+        len(record.get('deleted_unread') or []))
+    return JsonResponse({'accepted': True, 'pass_id': pass_id}, status=202)
 
 
 # ── MCP relay and API tokens ─────────────────────────────────────────────────

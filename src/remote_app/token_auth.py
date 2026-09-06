@@ -18,7 +18,10 @@ from django.http import JsonResponse
 from django.utils import timezone
 
 TOKEN_PREFIX = 'swfr_'
-TOKEN_PATHS = ('/mcp/',)  # path_info prefixes where a token authenticates
+# path_info prefixes where a token authenticates: the MCP relay, and the
+# stage-out sweep ingest, whose caller is the production sweeper rather
+# than a person (remote_app/views.py, stageout_sweep_pass).
+TOKEN_PATHS = ('/mcp/', '/api/stageout/')
 LAST_USED_GRANULARITY = timedelta(minutes=1)
 
 

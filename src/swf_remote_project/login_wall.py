@@ -35,6 +35,10 @@ class LoginWallMiddleware:
         # MCP relay: refuses anonymous calls itself with a 401 so that a
         # headless client gets JSON, not a login redirect (views.mcp_proxy).
         '/mcp/',
+        # Stage-out sweep ingest: same reasoning, a machine caller must get
+        # JSON rather than a redirect (views.stageout_sweep_pass, which
+        # refuses anything without a token).
+        '/api/stageout/',
     )
     # The landing page: prod_home serves a self-contained local page to
     # anonymous visitors and the proxied hub to everyone else, so it stays
