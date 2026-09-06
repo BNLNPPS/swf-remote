@@ -16,6 +16,7 @@ state and other things read it.
 Modes:
   drain      receive events, record objects, delete the messages
   reconcile  authoritative count by listing, compared with the index
+  sweep      read failed jobs' reports, keep what is useful, delete them
   guard      nightly: is this an explosion, and pull the plug if so
   summary    the state as JSON, for the Capcom tile and for a human
 """
@@ -61,6 +62,22 @@ BYTES_HARD_CEILING_PER_DAY = int(os.environ.get("STAGEOUT_BYTES_HARD",
 RELATIVE_MULTIPLE = int(os.environ.get("STAGEOUT_RELATIVE_MULTIPLE", "20"))
 RELATIVE_FLOOR = int(os.environ.get("STAGEOUT_RELATIVE_FLOOR", "5000"))
 
+# The sweep. Objects are read only for jobs PanDA says failed, and only a
+# bounded number per failure signature: a storm says one thing many
+# thousands of times, and reading it one object at a time buys nothing.
+# Which jobs failed is PanDA's knowledge, on the far side of the
+# perimeter, so the sweep asks the monitor's MCP relay rather than
+# guessing from the reports themselves — a job that dies after writing a
+# healthy report says nothing about its own death.
+SWEEP_CREDENTIAL = os.environ.get(
+    "STAGEOUT_SWEEP_ENV", "/home/admin/.epic-sweep-mcp.env")
+SWEEP_LOOKBACK_DAYS = int(os.environ.get("STAGEOUT_SWEEP_DAYS", "2"))
+SWEEP_KEEP_PER_SIGNATURE = int(os.environ.get("STAGEOUT_SWEEP_KEEP", "5"))
+SWEEP_MAX_READS = int(os.environ.get("STAGEOUT_SWEEP_MAX_READS", "200"))
+# A job's objects are left alone until it has been over for this long, so
+# the sweep never races a job that is still writing.
+SWEEP_MIN_AGE_SECONDS = int(os.environ.get("STAGEOUT_SWEEP_MIN_AGE", "1800"))
+
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS objects (
     key       TEXT PRIMARY KEY,
@@ -72,6 +89,17 @@ CREATE TABLE IF NOT EXISTS objects (
 CREATE INDEX IF NOT EXISTS objects_seen ON objects (seen_at);
 CREATE INDEX IF NOT EXISTS objects_subject ON objects (subject);
 CREATE TABLE IF NOT EXISTS state (k TEXT PRIMARY KEY, v TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS reports (
+    pandaid    INTEGER PRIMARY KEY,
+    jeditaskid INTEGER,
+    site       TEXT,
+    endtime    TEXT,
+    report     TEXT NOT NULL,
+    objects    INTEGER NOT NULL,
+    swept_at   REAL NOT NULL,
+    flushed_at REAL
+);
+CREATE INDEX IF NOT EXISTS reports_flushed ON reports (flushed_at);
 CREATE TABLE IF NOT EXISTS daily (
     day       TEXT PRIMARY KEY,
     objects   INTEGER NOT NULL,
@@ -297,6 +325,171 @@ def guard(conn, arm=True):
     return outcome
 
 
+def _sweep_credential():
+    """The relay URL and bearer token, from the mode-600 environment file."""
+    values = {}
+    with open(SWEEP_CREDENTIAL) as handle:
+        for line in handle:
+            if "=" in line and not line.startswith("#"):
+                key, _, value = line.partition("=")
+                values[key.strip()] = value.strip()
+    url, token = values.get("SWEEP_MCP_URL"), values.get("SWEEP_MCP_TOKEN")
+    if not url or not token:
+        raise RuntimeError(f"{SWEEP_CREDENTIAL} lacks the relay URL or token")
+    return url, token
+
+
+def mcp_call(tool, arguments, timeout=120):
+    """One tool call on the swf-monitor MCP relay, as the service account.
+
+    The relay is how this side of the perimeter asks PanDA anything; it
+    is the same path a person's browser takes, under a token rather than
+    a session.
+    """
+    import urllib.request
+
+    url, token = _sweep_credential()
+    body = json.dumps({"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+                       "params": {"name": tool, "arguments": arguments}})
+    request = urllib.request.Request(
+        url, data=body.encode(), method="POST",
+        headers={"Authorization": f"Bearer {token}",
+                 "Content-Type": "application/json",
+                 "Accept": "application/json, text/event-stream"})
+    with urllib.request.urlopen(request, timeout=timeout) as response:
+        payload = json.loads(response.read().decode())
+    if "error" in payload:
+        raise RuntimeError(f"{tool} failed: {payload['error']}")
+    text = payload["result"]["content"][0]["text"]
+    return json.loads(text)
+
+
+def failed_jobs(days):
+    """PanDA ids that ended failed in the window, with the attributes the
+    signature and the record need. Paged through the relay's id cursor."""
+    found = {}
+    before_id = None
+    for _ in range(20):
+        arguments = {"status": "failed", "days": days, "limit": 500}
+        if before_id:
+            arguments["before_id"] = before_id
+        page = mcp_call("panda_list_jobs", arguments)
+        rows = page.get("jobs") or []
+        if not rows:
+            break
+        for row in rows:
+            found[int(row["pandaid"])] = {
+                "jeditaskid": row.get("jeditaskid"),
+                "site": row.get("computingsite"),
+                "endtime": row.get("endtime") or row.get("modificationtime")}
+        before_id = min(int(r["pandaid"]) for r in rows)
+        if len(rows) < 500:
+            break
+    return found
+
+
+def delete_objects(keys):
+    """Delete in batches, the API's own unit, rather than one call each."""
+    deleted = 0
+    for start in range(0, len(keys), 100):
+        batch = keys[start:start + 100]
+        payload = json.dumps(
+            {"Objects": [{"Key": k} for k in batch], "Quiet": True})
+        aws("s3api", "delete-objects", "--bucket", BUCKET,
+            "--delete", payload, parse=False)
+        deleted += len(batch)
+    return deleted
+
+
+def sweep(conn):
+    """Read the objects of failed jobs, keep what is useful, delete them.
+
+    Selective by design: a bounded number of jobs per failure signature
+    are read and stored, and the rest of that signature's objects are
+    deleted unread. The signature is the task and site until the payload
+    digest is available for it; a storm concentrates in both.
+
+    Successful jobs are never read. Their objects expire on their own,
+    which is what the seven-day rule is for.
+    """
+    now = time.time()
+    swept_already = {row[0] for row in conn.execute(
+        "SELECT pandaid FROM reports")}
+    # Candidate subjects: numeric ids, quiet long enough to be over.
+    candidates = {}
+    for subject, count, newest in conn.execute(
+            "SELECT subject, COUNT(*), MAX(seen_at) FROM objects "
+            "WHERE subject IS NOT NULL GROUP BY subject"):
+        if not str(subject).isdigit() or int(subject) in swept_already:
+            continue
+        if now - newest < SWEEP_MIN_AGE_SECONDS:
+            continue
+        candidates[int(subject)] = count
+    if not candidates:
+        outcome = {"at": now, "candidates": 0, "read": 0, "stored": 0,
+                   "deleted_unread": 0, "objects_deleted": 0}
+        set_state(conn, "last_sweep", outcome)
+        conn.commit()
+        return outcome
+
+    failed = failed_jobs(SWEEP_LOOKBACK_DAYS)
+    targets = {pid: failed[pid] for pid in candidates if pid in failed}
+
+    groups = {}
+    for pandaid, attrs in targets.items():
+        groups.setdefault(
+            (attrs["jeditaskid"], attrs["site"]), []).append(pandaid)
+
+    read = stored = unread = objects_deleted = 0
+    for signature, members in groups.items():
+        members.sort()
+        for position, pandaid in enumerate(members):
+            keys = [row[0] for row in conn.execute(
+                "SELECT key FROM objects WHERE subject = ? ORDER BY key",
+                (str(pandaid),))]
+            if not keys:
+                continue
+            keep = (position < SWEEP_KEEP_PER_SIGNATURE
+                    and read < SWEEP_MAX_READS)
+            if keep:
+                # The last object is the most complete account the job
+                # managed to write before it died.
+                try:
+                    text = aws("s3", "cp", f"s3://{BUCKET}/{keys[-1]}", "-",
+                               parse=False)
+                    report = json.loads(text)
+                    read += 1
+                except (RuntimeError, ValueError) as exc:
+                    print(f"unreadable report for {pandaid}: {exc}",
+                          file=sys.stderr)
+                    continue
+                attrs = targets[pandaid]
+                conn.execute(
+                    "INSERT INTO reports (pandaid, jeditaskid, site, endtime, "
+                    "report, objects, swept_at) VALUES (?, ?, ?, ?, ?, ?, ?) "
+                    "ON CONFLICT(pandaid) DO UPDATE SET report = excluded.report",
+                    (pandaid, attrs["jeditaskid"], attrs["site"],
+                     attrs["endtime"], json.dumps(report), len(keys), now))
+                stored += 1
+            else:
+                unread += 1
+            objects_deleted += delete_objects(keys)
+            conn.execute("DELETE FROM objects WHERE subject = ?",
+                         (str(pandaid),))
+            conn.commit()
+
+    outcome = {"at": now, "candidates": len(candidates),
+               "failed_of_those": len(targets), "signatures": len(groups),
+               "read": read, "stored": stored, "deleted_unread": unread,
+               "objects_deleted": objects_deleted,
+               "pending_flush": conn.execute(
+                   "SELECT COUNT(*) FROM reports WHERE flushed_at IS NULL"
+               ).fetchone()[0]}
+    set_state(conn, "last_sweep", outcome)
+    conn.commit()
+    return outcome
+
+
 def reporting_key_id():
     """The reporting user's access key id, from IAM rather than from the
     credential file, so the guard acts on what is actually enabled."""
@@ -370,8 +563,9 @@ def summary(conn):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    parser.add_argument("mode",
-                        choices=("drain", "reconcile", "guard", "summary"))
+    parser.add_argument(
+        "mode",
+        choices=("drain", "reconcile", "sweep", "guard", "summary"))
     parser.add_argument("--no-arm", action="store_true",
                         help="report a breach without disabling the key")
     args = parser.parse_args()
@@ -382,6 +576,8 @@ def main():
             print(f"drained {seen} messages, recorded {recorded} objects")
         elif args.mode == "reconcile":
             print(json.dumps(reconcile(conn), indent=2))
+        elif args.mode == "sweep":
+            print(json.dumps(sweep(conn), indent=2))
         elif args.mode == "guard":
             print(json.dumps(guard(conn, arm=not args.no_arm), indent=2))
         else:
