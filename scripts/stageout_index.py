@@ -16,6 +16,7 @@ state and other things read it.
 Modes:
   drain      receive events, record objects, delete the messages
   reconcile  authoritative count by listing, compared with the index
+  guard      nightly: is this an explosion, and pull the plug if so
   summary    the state as JSON, for the Capcom tile and for a human
 """
 
@@ -43,6 +44,23 @@ RATE_CEILING_PER_HOUR = int(os.environ.get("STAGEOUT_RATE_CEILING", "20000"))
 # total says.
 PER_JOB_CEILING = int(os.environ.get("STAGEOUT_PER_JOB_CEILING", "50"))
 
+# The nightly guard's ceilings. Expected production is of the order of
+# 100,000 objects a day at a few kilobytes each; these are the levels at
+# which the traffic stops being production and starts being a defect.
+REPORTING_USER = os.environ.get("STAGEOUT_REPORTING_USER", "epic-job-reporter")
+OBJECT_SOFT_CEILING_PER_DAY = int(
+    os.environ.get("STAGEOUT_OBJECT_SOFT", "500000"))
+OBJECT_HARD_CEILING_PER_DAY = int(
+    os.environ.get("STAGEOUT_OBJECT_HARD", "1000000"))
+BYTES_SOFT_CEILING_PER_DAY = int(os.environ.get("STAGEOUT_BYTES_SOFT",
+                                                str(5 * 10 ** 9)))
+BYTES_HARD_CEILING_PER_DAY = int(os.environ.get("STAGEOUT_BYTES_HARD",
+                                                str(50 * 10 ** 9)))
+# A day that is this many times the recent norm is an explosion whatever
+# the absolute ceilings say; the floor keeps a quiet week from tripping it.
+RELATIVE_MULTIPLE = int(os.environ.get("STAGEOUT_RELATIVE_MULTIPLE", "20"))
+RELATIVE_FLOOR = int(os.environ.get("STAGEOUT_RELATIVE_FLOOR", "5000"))
+
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS objects (
     key       TEXT PRIMARY KEY,
@@ -54,6 +72,12 @@ CREATE TABLE IF NOT EXISTS objects (
 CREATE INDEX IF NOT EXISTS objects_seen ON objects (seen_at);
 CREATE INDEX IF NOT EXISTS objects_subject ON objects (subject);
 CREATE TABLE IF NOT EXISTS state (k TEXT PRIMARY KEY, v TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS daily (
+    day       TEXT PRIMARY KEY,
+    objects   INTEGER NOT NULL,
+    bytes     INTEGER NOT NULL,
+    at        REAL NOT NULL
+);
 """
 
 # reports/<subject>/<sequence>.json — the subject is the PanDA job id once
@@ -191,6 +215,119 @@ def reconcile(conn):
     return outcome
 
 
+def guard(conn, arm=True):
+    """The nightly guard: does the traffic look like an explosion, and
+    pull the plug if it does.
+
+    The signal is the index, not the bill: objects and bytes are what
+    boom first and the invoice is their lagging shadow. Two absolute
+    ceilings and one relative one, because a ceiling set against today's
+    expectation ages badly, and a sudden multiple of the recent norm is
+    the shape of a runaway whatever the norm was.
+
+    The plug is the reporting key. Disabling it stops jobs already
+    running, since a running job keeps the environment it started with
+    and the payload treats a failed write as ordinary (swf-epicprod
+    docs/JOB_REPORTING.md). Only that key is touched: the sweep and
+    stage-out keys survive, so reading and log stage-out continue.
+    """
+    now = time.time()
+    day_objects, day_bytes = conn.execute(
+        "SELECT COUNT(*), COALESCE(SUM(size), 0) FROM objects "
+        "WHERE seen_at > ?", (now - 86400,)).fetchone()
+    # The trailing norm, excluding the last day, over whatever history
+    # the index holds. Expiry keeps that to about a week.
+    prior_days = conn.execute(
+        "SELECT COUNT(*) FROM objects WHERE seen_at <= ? AND seen_at > ?",
+        (now - 86400, now - 7 * 86400)).fetchone()[0]
+    norm_per_day = prior_days / 6.0 if prior_days else 0.0
+
+    breaches = []
+    if day_objects > OBJECT_HARD_CEILING_PER_DAY:
+        breaches.append(f"{day_objects:,} objects in 24 hours, hard ceiling "
+                        f"{OBJECT_HARD_CEILING_PER_DAY:,}")
+    if day_bytes > BYTES_HARD_CEILING_PER_DAY:
+        breaches.append(f"{day_bytes / 1e9:.1f} GB written in 24 hours, hard "
+                        f"ceiling {BYTES_HARD_CEILING_PER_DAY / 1e9:.0f} GB")
+    if (norm_per_day >= RELATIVE_FLOOR
+            and day_objects > norm_per_day * RELATIVE_MULTIPLE):
+        breaches.append(
+            f"{day_objects:,} objects in 24 hours against a recent norm of "
+            f"{norm_per_day:,.0f} a day, over {RELATIVE_MULTIPLE}x")
+
+    warnings = []
+    if not breaches:
+        if day_objects > OBJECT_SOFT_CEILING_PER_DAY:
+            warnings.append(f"{day_objects:,} objects in 24 hours, expected "
+                            f"under {OBJECT_SOFT_CEILING_PER_DAY:,}")
+        if day_bytes > BYTES_SOFT_CEILING_PER_DAY:
+            warnings.append(f"{day_bytes / 1e9:.1f} GB in 24 hours, expected "
+                            f"under {BYTES_SOFT_CEILING_PER_DAY / 1e9:.0f} GB")
+
+    stopped = key_status() == "Inactive"
+    if breaches and arm and not stopped:
+        disable_reporting_key()
+        stopped = True
+
+    # The day's totals are kept forever, so growth outlives the objects.
+    today = time.strftime("%Y-%m-%d", time.gmtime(now - 43200))
+    conn.execute(
+        "INSERT INTO daily (day, objects, bytes, at) VALUES (?, ?, ?, ?) "
+        "ON CONFLICT(day) DO UPDATE SET objects = excluded.objects, "
+        "bytes = excluded.bytes, at = excluded.at",
+        (today, day_objects, day_bytes, now))
+    history = [
+        {"day": row[0], "objects": row[1], "bytes": row[2]}
+        for row in conn.execute(
+            "SELECT day, objects, bytes FROM daily ORDER BY day DESC LIMIT 14")]
+    this_week = sum(r["objects"] for r in history[:7])
+    last_week = sum(r["objects"] for r in history[7:14])
+    growth = (round((this_week - last_week) / last_week, 2)
+              if last_week else None)
+
+    outcome = {"at": now, "day_objects": day_objects,
+               "day_bytes": day_bytes,
+               "history": history[:14],
+               "week_over_week": growth,
+               "norm_objects_per_day": round(norm_per_day),
+               "breaches": breaches, "warnings": warnings,
+               "reporting_key_stopped": stopped}
+    set_state(conn, "last_guard", outcome)
+    conn.commit()
+    return outcome
+
+
+def reporting_key_id():
+    """The reporting user's access key id, from IAM rather than from the
+    credential file, so the guard acts on what is actually enabled."""
+    keys = aws("iam", "list-access-keys", "--user-name", REPORTING_USER,
+               "--output", "json").get("AccessKeyMetadata", [])
+    return keys[0]["AccessKeyId"] if keys else None
+
+
+def key_status():
+    try:
+        keys = aws("iam", "list-access-keys", "--user-name", REPORTING_USER,
+                   "--output", "json").get("AccessKeyMetadata", [])
+        return keys[0]["Status"] if keys else "Missing"
+    except RuntimeError as exc:
+        print(f"key status unreadable: {exc}", file=sys.stderr)
+        return "Unknown"
+
+
+def disable_reporting_key():
+    """Pull the plug. Reversible with one command, named in the notice."""
+    key_id = reporting_key_id()
+    if not key_id:
+        raise RuntimeError(f"no access key found for {REPORTING_USER}")
+    aws("iam", "update-access-key", "--user-name", REPORTING_USER,
+        "--access-key-id", key_id, "--status", "Inactive", parse=False)
+    print(f"DISABLED reporting key {key_id}; re-enable with: "
+          f"aws iam update-access-key --user-name {REPORTING_USER} "
+          f"--access-key-id {key_id} --status Active", file=sys.stderr)
+    return key_id
+
+
 def summary(conn):
     """The state other things read: totals, the last hour's rate against
     the ceiling, the busiest subject, and the freshness of both passes."""
@@ -216,7 +353,13 @@ def summary(conn):
         verdict = "warning"
         detail = (f"{last_reconcile['unheard']} objects in the bucket that no "
                   "event announced")
+    last_guard = get_state(conn, "last_guard", {})
+    if last_guard.get("reporting_key_stopped"):
+        verdict, detail = "alarm", (
+            "the reporting key is disabled: "
+            + "; ".join(last_guard.get("breaches") or ["stopped by the guard"]))
     return {"objects": total, "last_hour": hour, "last_day": day,
+            "guard": last_guard,
             "busiest_subject": busiest[0] if busiest else None,
             "busiest_count": busiest[1] if busiest else 0,
             "rate_ceiling": RATE_CEILING_PER_HOUR,
@@ -227,7 +370,10 @@ def summary(conn):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    parser.add_argument("mode", choices=("drain", "reconcile", "summary"))
+    parser.add_argument("mode",
+                        choices=("drain", "reconcile", "guard", "summary"))
+    parser.add_argument("--no-arm", action="store_true",
+                        help="report a breach without disabling the key")
     args = parser.parse_args()
     conn = db()
     try:
@@ -236,6 +382,8 @@ def main():
             print(f"drained {seen} messages, recorded {recorded} objects")
         elif args.mode == "reconcile":
             print(json.dumps(reconcile(conn), indent=2))
+        elif args.mode == "guard":
+            print(json.dumps(guard(conn, arm=not args.no_arm), indent=2))
         else:
             print(json.dumps(summary(conn), indent=2))
     finally:
