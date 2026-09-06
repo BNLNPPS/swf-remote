@@ -364,13 +364,19 @@ def mcp_call(tool, arguments, timeout=120):
     return json.loads(text)
 
 
-def failed_jobs(days):
-    """PanDA ids that ended failed in the window, with the attributes the
-    signature and the record need. Paged through the relay's id cursor."""
+def jobs_by_status(status, days):
+    """PanDA ids in the window with that terminal status, and the
+    attributes the signature and the record need. Paged through the
+    relay's id cursor.
+
+    Status is read positively, never inferred from absence: a job missing
+    from the failed list may have finished, may still be running, or may
+    lie outside the window, and those are not the same thing.
+    """
     found = {}
     before_id = None
     for _ in range(20):
-        arguments = {"status": "failed", "days": days, "limit": 500}
+        arguments = {"status": status, "days": days, "limit": 500}
         if before_id:
             arguments["before_id"] = before_id
         page = mcp_call("panda_list_jobs", arguments)
@@ -409,8 +415,11 @@ def sweep(conn):
     deleted unread. The signature is the task and site until the payload
     digest is available for it; a storm concentrates in both.
 
-    Successful jobs are never read. Their objects expire on their own,
-    which is what the seven-day rule is for.
+    A finished job's objects are deleted the moment this pass learns the
+    job finished. Their usefulness ended at that verdict, and leaving
+    them to the seven-day rule would keep a week of dead weight in the
+    bucket for nothing. Expiry stays as the backstop for jobs this pass
+    could not resolve: still running, or outside the window.
     """
     now = time.time()
     swept_already = {row[0] for row in conn.execute(
@@ -432,8 +441,24 @@ def sweep(conn):
         conn.commit()
         return outcome
 
-    failed = failed_jobs(SWEEP_LOOKBACK_DAYS)
+    failed = jobs_by_status("failed", SWEEP_LOOKBACK_DAYS)
     targets = {pid: failed[pid] for pid in candidates if pid in failed}
+
+    # Finished jobs: nothing to learn, so their objects go now rather
+    # than sitting out the week.
+    finished = jobs_by_status("finished", SWEEP_LOOKBACK_DAYS)
+    finished_deleted = finished_objects = 0
+    for pandaid in candidates:
+        if pandaid in targets or pandaid not in finished:
+            continue
+        keys = [row[0] for row in conn.execute(
+            "SELECT key FROM objects WHERE subject = ?", (str(pandaid),))]
+        if not keys:
+            continue
+        finished_objects += delete_objects(keys)
+        conn.execute("DELETE FROM objects WHERE subject = ?", (str(pandaid),))
+        finished_deleted += 1
+    conn.commit()
 
     groups = {}
     for pandaid, attrs in targets.items():
@@ -482,6 +507,9 @@ def sweep(conn):
                "failed_of_those": len(targets), "signatures": len(groups),
                "read": read, "stored": stored, "deleted_unread": unread,
                "objects_deleted": objects_deleted,
+               "finished_jobs_cleared": finished_deleted,
+               "finished_objects_deleted": finished_objects,
+               "unresolved": len(candidates) - len(targets) - finished_deleted,
                "pending_flush": conn.execute(
                    "SELECT COUNT(*) FROM reports WHERE flushed_at IS NULL"
                ).fetchone()[0]}
