@@ -198,6 +198,30 @@ def drain(conn, max_batches=200):
     return recorded, seen
 
 
+def sweep_state(conn, now):
+    """(time of the last applied pass, stall text or None).
+
+    Three states, not two. A sweeper reporting normally is silent here. A
+    sweeper past its threshold is stalled. A sweeper that has never
+    reported is neither, until someone declares that it should be
+    running: the commissioning stamp in `sweeper_expected_from` is what
+    turns absence into staleness, and it is set by hand when the far side
+    says the first real pass is imminent.
+    """
+    last_pass = conn.execute(
+        "SELECT MAX(applied_at) FROM passes").fetchone()[0]
+    if last_pass:
+        if now - last_pass > PASS_STALL_SECONDS:
+            return last_pass, (f"no sweep pass reported for "
+                               f"{(now - last_pass) / 3600:.1f} hours")
+        return last_pass, None
+    expected = get_state(conn, "sweeper_expected_from")
+    if expected and now - float(expected) > PASS_STALL_SECONDS:
+        return None, ("the sweeper was expected to be running and has "
+                      "never reported a pass")
+    return None, None
+
+
 def apply_passes(conn):
     """Apply the sweeper's spooled pass records to the index.
 
@@ -360,14 +384,12 @@ def guard(conn, arm=True):
     # pulling the write credential would not fix and would make worse: the
     # jobs would go quiet while the backlog stayed. It gets its own verdict
     # and never arms the plug.
-    last_pass = conn.execute(
-        "SELECT MAX(applied_at) FROM passes").fetchone()[0]
-    stalled = None
-    if last_pass and now - last_pass > PASS_STALL_SECONDS:
-        stalled = (f"no sweep pass reported for "
-                   f"{(now - last_pass) / 3600:.1f} hours")
-    elif not last_pass and day_objects:
-        stalled = "no sweep pass has ever been reported"
+    #
+    # A sweeper that has never run is a third thing again, and saying
+    # "stalled" of something not yet built would be a false alarm standing
+    # for days, which is how a tile teaches its reader to ignore it. The
+    # threshold therefore means nothing until commissioning is declared.
+    last_pass, stalled = sweep_state(conn, now)
     if stalled:
         warnings.append(stalled)
 
@@ -450,13 +472,10 @@ def summary(conn):
         "SELECT subject, COUNT(*) c FROM objects WHERE seen_at > ? "
         "GROUP BY subject ORDER BY c DESC LIMIT 1", (now - 86400,)).fetchone()
     last_reconcile = get_state(conn, "last_reconcile", {})
-    last_pass = conn.execute(
-        "SELECT MAX(applied_at) FROM passes").fetchone()[0]
+    last_pass, stalled = sweep_state(conn, now)
     verdict, detail = "ok", ""
-    if last_pass and now - last_pass > PASS_STALL_SECONDS:
-        verdict = "warning"
-        detail = (f"the sweeper has reported no pass for "
-                  f"{(now - last_pass) / 3600:.1f} hours")
+    if stalled:
+        verdict, detail = "warning", "the sweeper has reported no pass: " + stalled
     if hour > RATE_CEILING_PER_HOUR:
         verdict = "alarm"
         detail = f"{hour} objects in the last hour, ceiling {RATE_CEILING_PER_HOUR}"
