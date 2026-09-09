@@ -153,13 +153,22 @@ A check that cannot reach an answer writes nothing. A network failure or a
 revoked token leaves the stored value alone rather than recording a negative
 and revoking an account that still holds its access.
 
-Enforcement belongs to swf-monitor and is described there. Two rules apply:
-requests that change state — POST, PATCH, PUT, DELETE — require authority,
-while the safe methods do not; and reaching the production operations agent
-requires authority whatever method triggered it, since that agent's documented
-trigger pattern includes a GET that publishes a message. Both default to
-refusing, so a capability nobody has classified is protected rather than
-exposed.
+Enforcement belongs to swf-monitor and is described there. It applies to
+requests made by a person: a browser session, or a tunnel identity resolving to
+a human account. Machine traffic authenticated by a service token is a separate
+population, gated already by holding the token, and is not subject to it. That
+population is most of the write traffic — agent logging, agent heartbeats and
+host reports run to thousands of POSTs a day and carry no person at all — and
+subjecting it to an organization requirement would deny it silently. A request
+whose authentication cannot be positively recognised as a service is treated as
+a person, so the exemption cannot itself become the opening.
+
+Within that population two rules apply: requests that change state — POST,
+PATCH, PUT, DELETE — require authority, while the safe methods do not; and
+reaching the production operations agent requires authority whatever method
+triggered it, since that agent's documented trigger pattern includes a GET that
+publishes a message. Both default to refusing, so a capability nobody has
+classified is protected rather than exposed.
 
 Someone who signs in without authority reaches all the monitoring information
 and is refused the actions, with the organization's joining procedure given in
