@@ -246,6 +246,32 @@ def snapper_proxy(request, **kwargs):
     return monitor_client.proxy(request, request.path_info)
 
 
+def users_admin_proxy(request, **kwargs):
+    """Proxy the User admin page from swf-monitor.
+
+    Account authority is stored and enforced upstream, so the page managing it
+    is rendered there; this carries it to the external face, where the
+    administrators are. Who may see it is swf-monitor's decision — staff and
+    accounts holding ops — and it refuses everyone else.
+    """
+    return monitor_client.proxy(request, request.path_info)
+
+
+@csrf_exempt
+def user_rights_proxy(request):
+    """Proxy the rights write the User admin page makes.
+
+    The caller's own identity is forwarded as X-Remote-User and swf-monitor
+    decides whether that person may set rights; this end only refuses the
+    anonymous. CSRF is exempted because the upstream endpoint authenticates by
+    the tunnel identity rather than session+CSRF, which the proxy does not
+    carry.
+    """
+    if not request.user.is_authenticated:
+        return JsonResponse({'error': 'Login required'}, status=401)
+    return monitor_client.proxy(request, '/api/user-rights/')
+
+
 def system_proxy(request):
     """Proxy the aggregate swf-monitor System page."""
     return monitor_client.proxy(request, '/system/')

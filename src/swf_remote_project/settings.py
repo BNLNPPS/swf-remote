@@ -155,6 +155,20 @@ ACCOUNT_EMAIL_VERIFICATION = 'none'
 # Provider sign-in is reached by POST from the login page, so a third party
 # cannot start the flow with a bare link.
 SOCIALACCOUNT_LOGIN_ON_GET = False
+# Identities that carry trust to swf-monitor over the tunnel, and so must
+# never become a person's account name. GitHub logins are otherwise adopted as
+# Django usernames on first sign-in, and a proxied request is identified to
+# swf-monitor by that username — a collaborator registering one of these on
+# GitHub would arrive upstream wearing a service identity. allauth refuses a
+# blacklisted name and generates a suffixed one instead.
+ACCOUNT_USERNAME_BLACKLIST = [
+    'swf-remote-authority',
+    'swf-remote-proxy',
+    'swf-remote-sync',
+    'swf-sweeper',
+    'swf-alarms',
+]
+
 SOCIALACCOUNT_PROVIDERS = {
     'github': {
         'APP': {
@@ -162,13 +176,19 @@ SOCIALACCOUNT_PROVIDERS = {
             'secret': config('SWF_REMOTE_GITHUB_SECRET', default=''),
             'key': '',
         },
-        # Identity only. read:org would be required to check eic membership,
-        # which is deliberately not a condition of signing in. user:email is
-        # what makes GitHub report whether an address is verified, which
-        # email authentication requires before it will match an account.
-        'SCOPE': ['read:user', 'user:email'],
+        # read:org resolves `eic` organization membership, including private
+        # membership, which is GitHub's default — without it a member reads
+        # as a non-member. user:email is what makes GitHub report whether an
+        # address is verified, which email authentication requires before it
+        # will match an account. See docs/live-data-access.md.
+        'SCOPE': ['read:user', 'user:email', 'read:org'],
     },
 }
+
+# GitHub organization whose membership carries authority for actions against
+# the production system. Resolved at sign-in and recorded on the account in
+# swf-monitor; swf-remote does not enforce on it.
+EIC_ORG = config('SWF_REMOTE_EIC_ORG', default='eic')
 
 # swf-monitor REST base URL (via SSH tunnel to pandaserver02)
 SWF_MONITOR_URL = config('SWF_REMOTE_MONITOR_URL', default='https://localhost:18443/swf-monitor')

@@ -45,12 +45,17 @@ users are not rate-limited unless observed use shows a need.
 
 An account is established either by a local username and password or by
 signing in with GitHub, which creates the Django account on first use so that
-collaborators need no provisioned credential. Both carry the same authority.
+collaborators need no provisioned credential. Both establish the same identity;
+what each may do is settled separately, in *Authority for actions*.
 
 Membership of the `eic` GitHub organization is not a condition of signing in.
-Authentication alone supplies the protection the policy needs, because a
-crawler does not complete an OAuth flow, whereas an organization test would
-exclude collaborators who do not use GitHub.
+Signing in admits a person to the monitoring information, and authentication
+alone supplies the protection that requires, because a crawler does not
+complete an OAuth flow. Acting on the production system is a separate
+question, answered by organization membership — see *Authority for actions*.
+Separating the two keeps monitoring readable by collaborators who consume it
+without belonging to the GitHub organization, while the operations the monitor
+carries are held to the collaboration's own membership.
 
 A GitHub identity whose verified address matches an existing account signs
 into that account and links the two, instead of creating a second one. The
@@ -100,6 +105,65 @@ proposal decision, whose approve executes the proposal; and assessment
 registration, written by the assessment services. A new monitor tool
 reaches the outside only when it is added to the set, the same opt-in
 principle the proxy applies to URLs.
+
+## Authority for actions
+
+Reading monitoring information requires an account. Acting on the production
+system requires authority, carried by two attributes on the account:
+
+    eic      unset | true | false           observed
+    rights   unset | read | basic | ops     granted
+
+An account may act when `rights` is not `read` and either `eic` is true or
+`rights` is `basic` or `ops`.
+
+The two are separate because they have different owners. `eic` records GitHub
+organization membership and is written only by swf-remote's sign-in sweep.
+`rights` records a decision and is written only by a person, on the User admin
+page. Neither writes the other's field, so provenance needs no marker: a grant
+survives every subsequent sign-in, and someone who leaves the organization
+loses access at their next sign-in without anyone acting. `rights: read` is an
+explicit refusal that outranks membership, and is the way to stop an
+organization member from acting.
+
+Each level names what its holder may do rather than what they may not, because
+a person reads their own standing on their account page.
+
+An account with no GitHub identity carries no `eic`, there being nothing to
+observe; its access is a `rights` grant, established inside the BNL
+authentication perimeter through the account sync from `pandaserver02`.
+
+Authority is a property of the account rather than of the request, and it is
+held in swf-monitor beside the identity that component already establishes
+from `X-Remote-User`. One rule therefore covers both faces: a person reaching
+swf-monitor directly inside the perimeter is judged as one arriving through
+this proxy.
+
+swf-remote observes and records; it does not enforce. GitHub sign-in happens
+here, so this is the only component that can ask GitHub the question. It asks
+at every sign-in, using the signed-in person's own token against the
+organization membership endpoint, and records the answer together with the
+GitHub login it was made against — several accounts carry a Django username
+unlike their GitHub login, and the account pages show which identity was
+tested. The `read:org` scope is required for that call: organization
+membership is private by default, and without the scope a member is
+indistinguishable from a non-member.
+
+A check that cannot reach an answer writes nothing. A network failure or a
+revoked token leaves the stored value alone rather than recording a negative
+and revoking an account that still holds its access.
+
+Enforcement belongs to swf-monitor and is described there. Two rules apply:
+requests that change state — POST, PATCH, PUT, DELETE — require authority,
+while the safe methods do not; and reaching the production operations agent
+requires authority whatever method triggered it, since that agent's documented
+trigger pattern includes a GET that publishes a message. Both default to
+refusing, so a capability nobody has classified is protected rather than
+exposed.
+
+Someone who signs in without authority reaches all the monitoring information
+and is refused the actions, with the organization's joining procedure given in
+the refusal.
 
 ## Sessions
 

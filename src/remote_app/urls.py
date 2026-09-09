@@ -111,6 +111,13 @@ urlpatterns = [
     # PanDA REST API (read-only JSON; catch-all proxy for DRF endpoints)
     path('api/panda/<path:path>', views.panda_api_proxy, name='panda_api_proxy'),
 
+    # Account authority. Both the User admin page and the rights write live in
+    # swf-monitor beside the data they manage; neither path falls under the
+    # panda/ or pcs/ catch-alls, so each needs its own entry to exist on the
+    # external face. See docs/live-data-access.md, Authority for actions.
+    path('users/admin/', views.users_admin_proxy, name='users_admin'),
+    path('api/user-rights/', views.user_rights_proxy, name='user_rights'),
+
     # SSE relay — dedicated streaming proxy for live browser push (see SSE_PUSH.md)
     path('api/messages/stream/', views.sse_proxy, name='sse_stream'),
 

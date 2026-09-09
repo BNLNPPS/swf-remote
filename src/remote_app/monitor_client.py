@@ -431,6 +431,35 @@ def _get(path, params=None, as_user=None):
         return {'error': str(e)}
 
 
+def _post(path, payload, as_user=None):
+    """POST JSON to swf-monitor, return parsed JSON dict.
+
+    `as_user` sets X-Remote-User for TunnelAuthentication, the same trust the
+    proxy gives the tunnel. Used without a Django request context (sign-in
+    hooks, the backfill), so it carries no correlation headers.
+    """
+    url = f"{_base()}{path}"
+    headers = dict(UPSTREAM_HEADERS)
+    headers['Content-Type'] = 'application/json'
+    if as_user:
+        headers['X-Remote-User'] = as_user
+    try:
+        resp = httpx.post(url, json=payload, timeout=TIMEOUT, verify=False,
+                          headers=headers)
+        resp.raise_for_status()
+        return resp.json() if resp.content else {}
+    except httpx.ConnectError as e:
+        logger.error(f"Cannot reach swf-monitor at {url}: {e}")
+        return {'error': 'Cannot reach swf-monitor (tunnel down?)'}
+    except httpx.HTTPStatusError as e:
+        logger.error(f"swf-monitor {e.response.status_code} for {url}: "
+                     f"{e.response.text[:300]}")
+        return {'error': f'Upstream error: {e.response.status_code}'}
+    except Exception as e:
+        logger.error(f"POST to {url} failed: {e}")
+        return {'error': str(e)}
+
+
 # ── Clean data accessors (for MCP, future) ──────────────────────────────────
 
 def get_activity(**kwargs):

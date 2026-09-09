@@ -118,8 +118,10 @@ Every proxied page is built by swf-monitor and fetched over the tunnel, so
 viewing one requires an account. Anonymous visitors reach a locally rendered
 landing page, the login path, and static assets; everything else redirects to
 sign-in. An account is established either by a local username and password or
-by signing in with GitHub, which creates it on first use; `eic` organization
-membership is not required. A command-line client authenticates with a
+by signing in with GitHub, which creates it on first use. Signing in is all
+that reading requires. Acting on the production system requires authority,
+held as two attributes on the account in swf-monitor and enforced there:
+observed `eic` organization membership, and granted `rights`. A command-line client authenticates with a
 per-user token created on `/prod/account/tokens/` and sent as
 `Authorization: Bearer <token>`; it reaches swf-monitor as that user. The
 cross-component policy is defined in

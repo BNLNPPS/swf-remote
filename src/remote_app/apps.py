@@ -8,3 +8,5 @@ class RemoteAppConfig(AppConfig):
     def ready(self):
         # Register pre_save snapshot signal for Entry versioning.
         from . import signals  # noqa: F401
+        # Register the sign-in hook that rewrites organization membership.
+        from . import authority  # noqa: F401
