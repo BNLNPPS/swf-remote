@@ -22,6 +22,7 @@ Modes:
 """
 
 import argparse
+from datetime import datetime
 import json
 import os
 import re
@@ -73,6 +74,13 @@ PASS_SPOOL = os.environ.get("STAGEOUT_PASS_SPOOL",
 # The sweeper reports hourly. Three missed hours is comfortably clear of one
 # slow pass and still tight against a dead sweeper (agreed 2026-09-06).
 PASS_STALL_SECONDS = int(os.environ.get("STAGEOUT_PASS_STALL", str(3 * 3600)))
+# A listing sees an object the instant it lands; its event reaches the
+# queue seconds to a minute later and the drain runs every five minutes.
+# An unindexed object younger than this is not yet heard, not unheard
+# (2026-09-11: two objects written in the cross-check's minute read as
+# unheard for a day).
+RECONCILE_GRACE_SECONDS = int(os.environ.get("STAGEOUT_RECONCILE_GRACE",
+                                             str(15 * 60)))
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS objects (
@@ -143,6 +151,17 @@ def set_state(conn, key, value):
 def get_state(conn, key, default=None):
     row = conn.execute("SELECT v FROM state WHERE k = ?", (key,)).fetchone()
     return json.loads(row[0]) if row else default
+
+
+def _epoch(iso):
+    """Seconds since the epoch for a listing's LastModified
+    (2026-09-12T03:40:01+00:00 or ...Z); an unreadable one counts as old."""
+    if not iso:
+        return 0.0
+    try:
+        return datetime.fromisoformat(iso.replace("Z", "+00:00")).timestamp()
+    except ValueError:
+        return 0.0
 
 
 def subject_of(key):
@@ -290,9 +309,11 @@ def reconcile(conn):
     compare with the index, then drop rows for objects that are gone.
 
     Listing once a night costs a fraction of a cent. Drift is the signal
-    that events were missed or that something writes without telling us.
+    that events were missed or that something writes without telling us;
+    an object younger than RECONCILE_GRACE_SECONDS is left to the drain.
     """
     sizes = {}
+    modified = {}
     token = None
     while True:
         args = ["s3api", "list-objects-v2", "--bucket", BUCKET,
@@ -302,14 +323,19 @@ def reconcile(conn):
         page = aws(*args)
         for item in page.get("Contents", []):
             sizes[item["Key"]] = int(item.get("Size") or 0)
+            modified[item["Key"]] = item.get("LastModified") or ""
         token = page.get("NextContinuationToken")
         if not (page.get("IsTruncated") and token):
             break
     keys = set(sizes)
 
     indexed = {row[0] for row in conn.execute("SELECT key FROM objects")}
-    missing_from_index = keys - indexed          # events we never heard about
     gone_from_bucket = indexed - keys            # expired or swept
+    # Unindexed keys split by age: an event for a fresh object is still
+    # in flight, so only the older ones were never heard about.
+    horizon = time.time() - RECONCILE_GRACE_SECONDS
+    pending = {k for k in keys - indexed if _epoch(modified[k]) > horizon}
+    missing_from_index = keys - indexed - pending
 
     for key in gone_from_bucket:
         conn.execute("DELETE FROM objects WHERE key = ?", (key,))
@@ -324,6 +350,7 @@ def reconcile(conn):
     outcome = {"at": time.time(), "bucket_count": len(keys),
                "index_count": len(indexed),
                "unheard": len(missing_from_index),
+               "pending": len(pending),
                "pruned": len(gone_from_bucket)}
     set_state(conn, "last_reconcile", outcome)
     conn.commit()
