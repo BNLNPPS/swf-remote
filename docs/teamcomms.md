@@ -47,10 +47,11 @@ The response fields are:
 
 | Field | Meaning |
 |---|---|
-| `subject` | Immutable remote account PK as a string; AI identity uses `ai:<PK>` |
+| `subject` | Immutable remote account PK; nonhuman identities use `<kind>:<PK>` |
 | `username`, `name` | Current account login and display name |
-| `kind` | `human` or `ai` |
+| `kind` | `human`, `ai`, `program`, or `connector` |
 | `operator` | For AI, the human's `subject`, `username`, and `name` |
+| `account_subject` | For program/connector tokens, the canonical decimal remote account PK |
 | `auth_method` | `session` or `token` |
 | `csrf_verified` | Whether devcloud validated the cookie request |
 | `method` | Original HTTP method |
@@ -83,6 +84,28 @@ Existing tokens remain human identities. The AI option changes TC authorship;
 the monitor continues to enforce the account's production permissions on other
 interfaces. Connectors use the public TC URL and the existing token-file format.
 
+## Program and platform identities
+
+The tokens page also offers **Program / watcher** and **Platform connector**.
+The selected `teamcomms_service_kind` is stored at issuance, mutually exclusive
+with the AI option. Introspection binds these token-only actors to
+`program:<account PK>` or `connector:<account PK>` and returns `account_subject`
+for exact backend validation. These kinds have no AI operator field. Username
+still identifies the account whose collaboration permissions apply. Replacement
+tokens retain the same participant; labels and client headers cannot select an
+identity. Account inactivity and token revocation invalidate these actors through
+the existing authentication lifecycle. Other production interfaces keep their
+existing account authorization rules.
+
+`scripts/issue_teamcomms_service_tokens.py --output-dir PRIVATE_DIRECTORY` uses
+the dedicated host login file and existing token UI to issue both service kinds.
+It writes mode-0600 token files and revocation references, refuses existing output,
+and prints only file paths. Transfer those files through the established private
+host route; the introspection service credential is never a connector credential.
+`scripts/check_teamcomms_service_identity.py` checks identity binding, existing
+human/AI behavior, revocation, and metadata rejection with synthetic records and
+no database writes.
+
 ## Streaming
 
 The relay preserves upstream HTTP status, content type, MCP headers and SSE
@@ -104,7 +127,7 @@ The monitor uses the same value as `SWF_TEAMCOMMS_SERVICE_TOKEN` and the public
 introspection URL as `SWF_TEAMCOMMS_INTROSPECTION_URL`.
 
 `deploy/update_from_dev.sh` applies Django migrations, including
-`0008_teamcomms_auth`, before collecting static assets and reloading Apache.
+`0008_teamcomms_auth` and `0009_teamcomms_service_kind`, before collecting static assets and reloading Apache.
 Coordinate deployment with the monitor integration. Validate browser identity,
 token identity, CSRF rejection, stream delivery/replay and revocation through
 the public URL. Live Claude/Codex acceptance is tracked in

@@ -28,15 +28,18 @@ def _hash(raw):
     return hashlib.sha256(raw.encode()).hexdigest()
 
 
-def issue_token(user, label='', *, teamcomms_ai=False):
+def issue_token(user, label='', *, teamcomms_ai=False, teamcomms_service_kind=''):
     """Create a token for ``user``; returns (plaintext, ApiToken)."""
     from .models import ApiToken
+    if teamcomms_service_kind not in {'', 'program', 'connector'} or (teamcomms_ai and teamcomms_service_kind):
+        raise ValueError('Select an AI client or a service identity, not both')
     raw = TOKEN_PREFIX + secrets.token_urlsafe(32)
     token = ApiToken.objects.create(
         user=user, label=(label or '')[:100],
         prefix=raw[len(TOKEN_PREFIX):len(TOKEN_PREFIX) + 8],
         key_hash=_hash(raw),
         teamcomms_ai=teamcomms_ai,
+        teamcomms_service_kind=teamcomms_service_kind,
     )
     return raw, token
 

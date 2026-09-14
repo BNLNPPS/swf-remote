@@ -58,14 +58,17 @@ def login(client, base, credential_file):
     return page
 
 
-def issue(client, url, *, ai):
+def issue(client, url, *, ai, service_kind=''):
     page = client.get(url)
     csrf = Form(page.text).csrf
     require(csrf, 'Tokens form has no CSRF token')
-    data = {'label': 'TeamComms live acceptance ' + ('AI' if ai else 'human'),
+    data = {'label': ('TeamComms ' + service_kind if service_kind else
+                      'TeamComms live acceptance ' + ('AI' if ai else 'human')),
             'csrfmiddlewaretoken': csrf}
     if ai:
         data['teamcomms_ai'] = 'on'
+    if service_kind:
+        data['teamcomms_service_kind'] = service_kind
     page = client.post(url, data=data, headers={'Referer': url})
     page.raise_for_status()
     found = re.search(r'swfr_[A-Za-z0-9_-]{43}', page.text)
