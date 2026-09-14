@@ -18,6 +18,7 @@ urlpatterns = [
     path('mcp/<path:subpath>', views.mcp_proxy, name='mcp_sub'),
 
     path('teamcomms-auth/introspect/', teamcomms.introspect, name='teamcomms_introspect'),
+    path('teamcomms/browser-csrf', teamcomms.browser_csrf, name='teamcomms_browser_csrf'),
     path('teamcomms/', teamcomms.proxy, name='teamcomms'),
     path('teamcomms/<path:subpath>', teamcomms.proxy, name='teamcomms_sub'),
 

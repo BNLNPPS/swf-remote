@@ -132,3 +132,19 @@ Coordinate deployment with the monitor integration. Validate browser identity,
 token identity, CSRF rejection, stream delivery/replay and revocation through
 the public URL. Live Claude/Codex acceptance is tracked in
 [the connector documentation](https://github.com/wenaus/teamcomms-ai/blob/main/docs/connectors.md).
+
+## Browser editor
+
+The TeamComms root serves the package's Entries editor and shared navigation.
+The authenticated `GET /prod/teamcomms/browser-csrf` endpoint returns a masked
+Django CSRF token and `header_name: X-CSRFToken`. The host middleware sets its
+own CSRF cookie when absent. It requires an active browser session and rejects
+bearer authentication; no account token is exposed to browser storage. The UI
+uses same-origin cookies and sends the header for POST requests. The ordinary
+proxy CSRF validation and backend request attestation remain authoritative.
+
+Bundled assets travel through the same authenticated tunnel subtree. The relay
+preserves Content-Security-Policy, X-Content-Type-Options and Referrer-Policy
+from the package. It does not forward backend Set-Cookie headers. HTML visits
+to the UI without a session redirect through existing devcloud login; API and
+asset authentication failures remain JSON errors.
