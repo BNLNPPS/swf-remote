@@ -6,7 +6,7 @@
 <div class="container mt-4" style="max-width: 800px;">
     <h2 class="mb-3">API tokens</h2>
     <p>A token lets a command-line client such as Claude Code use the MCP endpoint
-       <code>{{ mcp_url }}</code> as you. Treat it like a password and revoke it here when it is no longer needed.</p>
+       <code>{{ mcp_url }}</code> and TeamComms as your account. Treat it like a password and revoke it here when it is no longer needed.</p>
 
     {% if new_token %}
     <div class="alert alert-success">
@@ -17,9 +17,10 @@
     </div>
     {% endif %}
 
-    <form method="post" class="d-flex gap-2 mb-4">
+    <form method="post" class="d-flex flex-wrap align-items-center gap-2 mb-4">
         {% csrf_token %}
         <input type="text" name="label" class="form-control" placeholder="Label, for example: laptop claude code" maxlength="100" style="max-width: 380px;">
+        <label class="form-check-label"><input type="checkbox" name="teamcomms_ai" class="form-check-input me-1"> AI client in TeamComms</label>
         <button type="submit" class="btn btn-primary">Create token</button>
     </form>
 
@@ -29,7 +30,7 @@
         {% for t in tokens %}
             <tr{% if t.revoked %} class="text-muted"{% endif %}>
                 <td><code>swfr_{{ t.prefix }}…</code></td>
-                <td>{{ t.label }}</td>
+                <td>{{ t.label }}{% if t.teamcomms_ai %}<div>TeamComms AI client</div>{% endif %}</td>
                 <td>{{ t.created|date:"Y-m-d H:i" }}</td>
                 <td>{% if t.last_used %}{{ t.last_used|date:"Y-m-d H:i" }}{% else %}never{% endif %}</td>
                 <td>

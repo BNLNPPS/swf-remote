@@ -1,6 +1,6 @@
 from django.contrib.auth.decorators import login_required
 from django.urls import path, re_path
-from . import views
+from . import views, teamcomms
 
 app_name = 'monitor_app'
 
@@ -16,6 +16,10 @@ urlpatterns = [
     # user or token holder (docs/live-data-access.md, Tokens).
     path('mcp/', views.mcp_proxy, name='mcp'),
     path('mcp/<path:subpath>', views.mcp_proxy, name='mcp_sub'),
+
+    path('teamcomms-auth/introspect/', teamcomms.introspect, name='teamcomms_introspect'),
+    path('teamcomms/', teamcomms.proxy, name='teamcomms'),
+    path('teamcomms/<path:subpath>', teamcomms.proxy, name='teamcomms_sub'),
 
     # Stage-out sweep ingest: the production sweeper reports the objects it
     # deleted so the gateway's index can retire them (swf-epicprod

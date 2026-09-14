@@ -12,6 +12,7 @@ rsync -av \
 
 find "$TARGET_DIR" -path "$TARGET_DIR/.venv" -prune -o -type f -exec sudo chmod a+rw {} \; -o -type d -exec sudo chmod a+rwx {} \;
 
+"$VENV/bin/python" "$TARGET_DIR/src/manage.py" migrate --noinput
 "$VENV/bin/python" "$TARGET_DIR/src/manage.py" collectstatic --noinput
 
 # Touch WSGI script to trigger mod_wsgi daemon process reload

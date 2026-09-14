@@ -192,6 +192,15 @@ EIC_ORG = config('SWF_REMOTE_EIC_ORG', default='eic')
 
 # swf-monitor REST base URL (via SSH tunnel to pandaserver02)
 SWF_MONITOR_URL = config('SWF_REMOTE_MONITOR_URL', default='https://localhost:18443/swf-monitor')
+SWF_TEAMCOMMS_SERVICE_TOKEN = config('SWF_TEAMCOMMS_SERVICE_TOKEN', default='')
+_teamcomms_token_file = config('SWF_TEAMCOMMS_SERVICE_TOKEN_FILE', default='')
+if _teamcomms_token_file:
+    try:
+        SWF_TEAMCOMMS_SERVICE_TOKEN = Path(_teamcomms_token_file).read_text().strip()
+    except OSError:
+        import logging
+        logging.getLogger(__name__).error('TeamComms service credential file is unavailable')
+        SWF_TEAMCOMMS_SERVICE_TOKEN = ''
 
 # Service token for the SSE stream proxy hop (monitor_client.stream_sse). The
 # monitor's SSE endpoint honors Authorization: Token, not the X-Remote-User the

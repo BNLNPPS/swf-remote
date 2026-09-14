@@ -152,9 +152,28 @@ class ApiToken(models.Model):
     created = models.DateTimeField(auto_now_add=True)
     last_used = models.DateTimeField(null=True, blank=True)
     revoked = models.DateTimeField(null=True, blank=True)
+    teamcomms_ai = models.BooleanField(default=False)
 
     class Meta:
         db_table = 'api_token'
 
     def __str__(self):
         return f'{self.user.username}:{self.prefix}'
+
+
+class TeamCommsAuthReference(models.Model):
+    """Expiring request attestation; credentials stay in the devcloud database."""
+
+    key_hash = models.CharField(max_length=64, primary_key=True)
+    user = models.ForeignKey('auth.User', on_delete=models.CASCADE)
+    token = models.ForeignKey(ApiToken, on_delete=models.CASCADE, null=True)
+    session_key = models.CharField(max_length=40, blank=True, default='')
+    method = models.CharField(max_length=10)
+    path = models.TextField()
+    query_string = models.TextField(blank=True, default='')
+    body_sha256 = models.CharField(max_length=64)
+    csrf_verified = models.BooleanField(default=False)
+    expires_at = models.DateTimeField(db_index=True)
+
+    class Meta:
+        db_table = 'teamcomms_auth_reference'
