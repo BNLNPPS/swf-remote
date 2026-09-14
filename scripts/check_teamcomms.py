@@ -72,7 +72,8 @@ def issue(client, url, *, ai):
     require(found is not None, 'Token issuance did not return a token')
     raw = found.group(0)
     prefix = raw[5:13]
-    row = next((s for s in page.text.split('<tr') if 'swfr_' + prefix in s), '')
+    row = next((s for s in re.findall(r'<tr\b[^>]*>.*?</tr>', page.text, re.S)
+                if 'swfr_' + prefix in s), '')
     token_id = re.search(r'name="revoke" value="(\d+)"', row)
     require(token_id is not None, 'Issued token row has no revocation control')
     return raw, token_id.group(1)

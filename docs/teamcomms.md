@@ -23,7 +23,7 @@ string, body hash and CSRF result. Expired reference rows are removed as new
 requests arrive. Team records and messages remain in the monitor database.
 
 The relay constructs its upstream headers from an explicit allowlist. It sends
-`X-TeamComms-Auth-Ref`, `X-Forwarded-Host: epic-devcloud.org` and
+`Host: epic-devcloud.org`, `X-TeamComms-Auth-Ref`, `X-Forwarded-Host: epic-devcloud.org` and
 `X-Forwarded-Proto: https`. It forwards Content-Type, Accept, Origin,
 Last-Event-ID and MCP protocol/session headers. Cookies, user bearer tokens,
 and caller-supplied identity or forwarding assertions remain at devcloud.
