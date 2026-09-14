@@ -153,9 +153,15 @@ class ApiToken(models.Model):
     last_used = models.DateTimeField(null=True, blank=True)
     revoked = models.DateTimeField(null=True, blank=True)
     teamcomms_ai = models.BooleanField(default=False)
+    teamcomms_service_kind = models.CharField(max_length=16, blank=True, default='',
+        choices=[('', 'Account / AI client'), ('program', 'Program'), ('connector', 'Platform connector')])
 
     class Meta:
         db_table = 'api_token'
+        constraints = [models.CheckConstraint(
+            condition=(models.Q(teamcomms_service_kind='') |
+                       models.Q(teamcomms_service_kind__in=['program', 'connector'], teamcomms_ai=False)),
+            name='api_token_teamcomms_kind')]
 
     def __str__(self):
         return f'{self.user.username}:{self.prefix}'

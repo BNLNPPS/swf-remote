@@ -532,18 +532,24 @@ def account_tokens(request):
     from .models import ApiToken
     from .token_auth import issue_token
     new_token = None
+    token_error = None
     if request.method == 'POST':
         revoke_id = request.POST.get('revoke', '')
         if revoke_id.isdigit():
             ApiToken.objects.filter(user=request.user, pk=int(revoke_id),
                                     revoked__isnull=True).update(revoked=timezone.now())
         else:
-            new_token, _ = issue_token(
-                request.user, request.POST.get('label', '').strip(),
-                teamcomms_ai=request.POST.get('teamcomms_ai') == 'on',
-            )
+            try:
+                new_token, _ = issue_token(
+                    request.user, request.POST.get('label', '').strip(),
+                    teamcomms_ai=request.POST.get('teamcomms_ai') == 'on',
+                    teamcomms_service_kind=request.POST.get('teamcomms_service_kind', ''),
+                )
+            except ValueError as error:
+                token_error = str(error)
     return render(request, 'monitor_app/account_tokens.html', {
         'tokens': request.user.api_tokens.order_by('-created'),
         'new_token': new_token,
+        'token_error': token_error,
         'mcp_url': request.build_absolute_uri(reverse('monitor_app:mcp')),
     })

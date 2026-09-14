@@ -88,6 +88,12 @@ def introspect(request):
         if reference.token_id is not None and reference.token.teamcomms_ai:
             identity.update(subject='ai:' + str(user.pk), kind='ai',
                             name=human['name'] + ' AI', operator=human)
+        elif reference.token_id is not None and reference.token.teamcomms_service_kind:
+            kind = reference.token.teamcomms_service_kind
+            if kind not in {'program', 'connector'}:
+                return _json({'error': 'Invalid service identity'}, 401)
+            identity.update(subject=kind + ':' + str(user.pk), kind=kind,
+                            name=human['name'] + ' ' + kind, account_subject=str(user.pk))
         return _json(dict(identity,
             auth_method='token' if reference.token_id is not None else 'session',
             csrf_verified=reference.csrf_verified,
