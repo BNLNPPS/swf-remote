@@ -178,6 +178,7 @@ def proxy(request, subpath=''):
         # These are temporary authentication records, not retained team data.
         TeamCommsAuthReference.objects.filter(expires_at__lte=now).delete()
         headers = {
+            'Host': 'epic-devcloud.org',
             'X-TeamComms-Auth-Ref': raw,
             'X-Forwarded-Host': 'epic-devcloud.org',
             'X-Forwarded-Proto': 'https',
