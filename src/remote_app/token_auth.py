@@ -5,9 +5,8 @@ is stored; the plaintext is shown once, on the account tokens page.
 ``TokenAuthMiddleware`` turns a valid ``Authorization: Bearer swfr_...``
 header into the token's user before the login wall runs, so a token caller
 passes the wall and reaches swf-monitor as that user through X-Remote-User.
-Tokens are honored only on the MCP relay, so a leaked token is worth the
-relay's tool set and nothing else of the account. The token itself never
-crosses the tunnel.
+Tokens authenticate the MCP relay, TeamComms and stage-out ingest. The token
+itself never crosses the tunnel.
 """
 
 import hashlib
@@ -21,7 +20,7 @@ TOKEN_PREFIX = 'swfr_'
 # path_info prefixes where a token authenticates: the MCP relay, and the
 # stage-out sweep ingest, whose caller is the production sweeper rather
 # than a person (remote_app/views.py, stageout_sweep_pass).
-TOKEN_PATHS = ('/mcp/', '/api/stageout/')
+TOKEN_PATHS = ('/mcp/', '/api/stageout/', '/teamcomms/')
 LAST_USED_GRANULARITY = timedelta(minutes=1)
 
 
@@ -29,7 +28,7 @@ def _hash(raw):
     return hashlib.sha256(raw.encode()).hexdigest()
 
 
-def issue_token(user, label=''):
+def issue_token(user, label='', *, teamcomms_ai=False):
     """Create a token for ``user``; returns (plaintext, ApiToken)."""
     from .models import ApiToken
     raw = TOKEN_PREFIX + secrets.token_urlsafe(32)
@@ -37,6 +36,7 @@ def issue_token(user, label=''):
         user=user, label=(label or '')[:100],
         prefix=raw[len(TOKEN_PREFIX):len(TOKEN_PREFIX) + 8],
         key_hash=_hash(raw),
+        teamcomms_ai=teamcomms_ai,
     )
     return raw, token
 

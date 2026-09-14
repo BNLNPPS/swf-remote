@@ -5,6 +5,8 @@ swf-monitor REST endpoints via SSH tunnel from pandaserver02 at BNL.
 
 Sister project to swf-monitor, swf-testbed, swf-common-lib.
 
+TeamComms authentication, proxying and deployment: `docs/teamcomms.md`.
+
 ## Architecture
 
 - **Web pages**: most (hub, PanDA, PCS, Alarms, System) are full rendered HTML proxied from

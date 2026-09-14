@@ -538,7 +538,10 @@ def account_tokens(request):
             ApiToken.objects.filter(user=request.user, pk=int(revoke_id),
                                     revoked__isnull=True).update(revoked=timezone.now())
         else:
-            new_token, _ = issue_token(request.user, request.POST.get('label', '').strip())
+            new_token, _ = issue_token(
+                request.user, request.POST.get('label', '').strip(),
+                teamcomms_ai=request.POST.get('teamcomms_ai') == 'on',
+            )
     return render(request, 'monitor_app/account_tokens.html', {
         'tokens': request.user.api_tokens.order_by('-created'),
         'new_token': new_token,

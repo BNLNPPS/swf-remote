@@ -26,6 +26,9 @@ Browser → epic-devcloud.org (Django/Apache)
   full tool set, through the tunnel as the signed-in user. Headless
   clients authenticate with a per-user token (see *Live-data access*).
 - **No local PanDA data** — all data comes from swf-monitor in real time.
+- **TeamComms** — HTTP, MCP and streaming under `/prod/teamcomms/`, using
+  existing devcloud accounts and tokens. The [integration contract](docs/teamcomms.md)
+  describes authentication, AI identity, introspection and deployment.
 
 ## Sister projects
 

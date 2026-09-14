@@ -73,12 +73,11 @@ A signed-in person creates a token on the account tokens page
 (`/prod/account/tokens/`); it is shown once and stored as a hash. A request
 to the MCP relay carrying `Authorization: Bearer <token>` is authenticated
 as that person before the login wall runs and reaches swf-monitor as that
-username through `X-Remote-User`, exactly as a browser request does. A
-token is honored nowhere else, so a leaked token is worth the relay's tool
-set and not the account. The token never crosses the tunnel. Tokens are
-revoked on the same page.
+username through `X-Remote-User`, exactly as a browser request does. Tokens also
+authenticate TeamComms and the service-specific stage-out ingest. The token
+never crosses the tunnel. Tokens are revoked on the same page.
 
-The MCP relay at `/prod/mcp/` is the token's only consumer. It forwards
+The MCP relay at `/prod/mcp/` forwards
 JSON-RPC POSTs to swf-monitor's MCP endpoint, accepts a token and not a
 browser session, and refuses a call without one with a 401 rather than a
 login redirect, so the path is open in the login wall while the view itself
@@ -87,6 +86,12 @@ URL returns a self-contained setup page, rendered locally for anyone, so
 the endpoint address is the only thing a person or their assistant needs to
 be given; the System menu links to it. swf-monitor's external-access notes
 describe the contract from its side.
+
+TeamComms at `/prod/teamcomms/` accepts browser sessions and these tokens.
+Cookie mutations require CSRF validation. Its backend introspects short-lived
+request references at devcloud for admission and stream revalidation; token
+values and session cookies remain here. The token issuance page can bind an AI
+identity to the account. See [TeamComms integration](teamcomms.md).
 
 ### External tool set
 

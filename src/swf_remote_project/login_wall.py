@@ -39,12 +39,15 @@ class LoginWallMiddleware:
         # JSON rather than a redirect (views.stageout_sweep_pass, which
         # refuses anything without a token).
         '/api/stageout/',
+        # TeamComms views enforce token/session or service authentication and
+        # return JSON denials before any tunnel request.
+        '/teamcomms/',
     )
     # The landing page: prod_home serves a self-contained local page to
     # anonymous visitors and the proxied hub to everyone else, so it stays
     # reachable without touching the tunnel. Machine clients that poll it for
     # liveness keep their 200.
-    OPEN_EXACT = ('/', '/prod/')
+    OPEN_EXACT = ('/', '/prod/', '/teamcomms-auth/introspect/')
 
     def __init__(self, get_response):
         self.get_response = get_response
