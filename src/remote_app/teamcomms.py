@@ -17,9 +17,10 @@ from urllib.parse import urlsplit
 import httpx
 from django.conf import settings
 from django.contrib.auth import get_user
+from django.contrib.auth.views import redirect_to_login
 from django.core.exceptions import RequestDataTooBig
 from django.http import HttpResponse, JsonResponse, StreamingHttpResponse
-from django.middleware.csrf import CsrfViewMiddleware
+from django.middleware.csrf import CsrfViewMiddleware, get_token
 from django.utils import timezone
 from django.views.decorators.csrf import csrf_exempt
 
@@ -134,7 +135,8 @@ def _authenticated_request(request):
 
 def _response_headers(upstream, response):
     for key in ('Content-Type', 'MCP-Session-Id', 'MCP-Protocol-Version', 'Allow',
-                'Retry-After', 'WWW-Authenticate'):
+                'Retry-After', 'WWW-Authenticate', 'Content-Security-Policy',
+                'X-Content-Type-Options', 'Referrer-Policy'):
         if key in upstream.headers:
             response[key] = upstream.headers[key]
     response['Cache-Control'] = 'no-store'
@@ -150,6 +152,17 @@ def _response_headers(upstream, response):
     return response
 
 
+def browser_csrf(request):
+    """Supply this origin's masked CSRF token using its existing browser session."""
+    if request.method != 'GET':
+        return _json({'error': 'GET required'}, 405)
+    if (request.META.get('HTTP_AUTHORIZATION') or not request.user.is_authenticated
+            or not request.user.is_active):
+        return _json({'error': 'An active devcloud browser session is required'}, 401)
+    # CsrfViewMiddleware emits the host cookie, including when none was present.
+    return _json({'header_name': 'X-CSRFToken', 'token': get_token(request)})
+
+
 @csrf_exempt
 def proxy(request, subpath=''):
     """Relay authenticated TC HTTP/MCP and bounded SSE through the existing tunnel."""
@@ -160,6 +173,12 @@ def proxy(request, subpath=''):
     try:
         token, rejection = _authenticated_request(request)
         if rejection is not None:
+            if (rejection.status_code == 401 and request.method == 'GET'
+                    and not request.META.get('HTTP_AUTHORIZATION')
+                    and 'text/html' in request.headers.get('Accept', '')
+                    and (subpath in {'', 'entries', 'sessions', 'dialog'}
+                         or subpath.startswith('entries/'))):
+                return redirect_to_login(request.get_full_path())
             return rejection
         if int(request.META.get('CONTENT_LENGTH') or 0) > BODY_LIMIT:
             return _json({'error': 'Request too large'}, 413)
