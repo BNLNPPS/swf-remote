@@ -277,8 +277,17 @@ def system_proxy(request):
     return monitor_client.proxy(request, '/system/')
 
 
+@csrf_exempt
 def canary_proxy(request, **kwargs):
-    """Proxy the Canary site-health page from swf-monitor."""
+    """Proxy Canary pages and JSON controls using the upstream identity guard.
+
+    As with pcs_api_proxy, swf-monitor authenticates writes by the forwarded
+    user or Authorization header, not swf-remote's session CSRF cookie.
+    The outer login wall continues to govern access to the Canary subtree.
+    """
+    if (request.method != 'GET' and not request.user.is_authenticated
+            and not request.headers.get('Authorization')):
+        return JsonResponse({'error': 'Login required'}, status=401)
     return monitor_client.proxy(request, request.path_info)
 
 

@@ -93,6 +93,16 @@ request references at devcloud for admission and stream revalidation; token
 values and session cookies remain here. The token issuance page can bind an AI
 identity to the account. See [TeamComms integration](teamcomms.md).
 
+### Canary browser controls
+
+The `/canary/` proxy carries the probe page and its JSON controls at
+`/canary/probes/api/{config,run-now,payload-canary}/`. Like the PCS API proxy,
+the view is CSRF-exempt: swf-monitor authenticates the forwarded user or service
+Authorization header and enforces action rights. The devcloud CSRF cookie is
+not the monitor's cookie. The view refuses an unauthenticated write without an
+Authorization header with JSON 401; the existing login wall still governs the
+Canary subtree. Successful controls return JSON rather than a login redirect.
+
 ### External tool set
 
 The relay serves the tools named in `remote_app/mcp_policy.py` and no
