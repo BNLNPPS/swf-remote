@@ -9,9 +9,12 @@ production-scale prefix every few minutes would cost about as much as
 the reporting itself; a queue costs a dollar a month
 (swf-epicprod docs/JOB_REPORTING.md).
 
-Standard library plus the AWS CLI, which carries this host's account
-credentials. No boto3, no venv, no web-tier coupling: the tool owns its
-state and other things read it.
+Standard library plus boto3 for the drain and the AWS CLI for the rest,
+both on this host's account credentials. No venv, no web-tier coupling:
+the tool owns its state and other things read it. The drain is the one
+hot path: one in-process SQS client, ten messages received and ten
+deleted per call. A CLI process per message cost 0.7 s of CPU each and at
+campaign rate stacked the five-minute runs 25 deep (2026-09-15).
 
 Modes:
   drain      receive events, record objects, delete the messages
@@ -19,6 +22,9 @@ Modes:
   apply      apply the sweeper's spooled pass records to the index
   guard      nightly: is this an explosion, and pull the plug if so
   summary    the state as JSON, for the Capcom tile and for a human
+Cron on ec2dev, admin's crontab: drain every five minutes under
+`flock -n` and `nice -n 19` (a run that finds the lock held exits; runs
+never stack), reconcile at 03:40 UTC, guard at 03:50 UTC.
 """
 
 import argparse
@@ -26,6 +32,7 @@ from datetime import datetime
 import json
 import os
 import re
+import resource
 import sqlite3
 import subprocess
 import sys
@@ -38,6 +45,7 @@ QUEUE_URL = os.environ.get(
     "https://sqs.us-east-1.amazonaws.com/962718900486/epic-stageout-events")
 DB_PATH = os.environ.get(
     "STAGEOUT_INDEX_DB", "/home/admin/data/stageout-index.sqlite")
+REGION = os.environ.get("AWS_DEFAULT_REGION", "us-east-1")
 # Objects per hour above which the watch calls it a runaway. A defect that
 # posts in a loop inside one job is the unbounded risk the design names;
 # the fleet itself is finite.
@@ -169,25 +177,28 @@ def subject_of(key):
     return match.group(1) if match else None
 
 
-def drain(conn, max_batches=200):
+def drain(conn, max_batches=500):
     """Receive events and record their objects. Returns (recorded, seen).
 
     A message is deleted only after its rows are committed, so a crash
     repeats work rather than losing it; the key is the primary key, so a
-    repeat is a no-op.
+    repeat is a no-op. A run is bounded at max_batches rounds of ten, so
+    a backlog drains across runs at a few percent of one core rather than
+    all at once; the cron line's flock keeps runs from overlapping.
     """
+    import boto3  # the drain alone needs it; the other modes stay on the CLI
+    sqs = boto3.client("sqs", region_name=REGION)
     recorded = seen = 0
     for _ in range(max_batches):
-        result = aws("sqs", "receive-message", "--queue-url", QUEUE_URL,
-                     "--max-number-of-messages", "10",
-                     "--wait-time-seconds", "1", "--output", "json")
+        result = sqs.receive_message(
+            QueueUrl=QUEUE_URL, MaxNumberOfMessages=10, WaitTimeSeconds=1)
         messages = result.get("Messages") or []
         if not messages:
             break
-        handles = []
-        for message in messages:
+        entries = []
+        for n, message in enumerate(messages):
             seen += 1
-            handles.append(message["ReceiptHandle"])
+            entries.append({"Id": str(n), "ReceiptHandle": message["ReceiptHandle"]})
             try:
                 body = json.loads(message["Body"])
             except (KeyError, ValueError) as exc:
@@ -209,9 +220,14 @@ def drain(conn, max_batches=200):
                      record.get("eventTime", ""), subject_of(key), time.time()))
                 recorded += 1
         conn.commit()
-        for handle in handles:
-            aws("sqs", "delete-message", "--queue-url", QUEUE_URL,
-                "--receipt-handle", handle, parse=False)
+        reply = sqs.delete_message_batch(QueueUrl=QUEUE_URL, Entries=entries)
+        failed = reply.get("Failed") or []
+        if failed:
+            # An undeleted message returns after its visibility timeout and
+            # is re-recorded as a no-op; say so rather than hide it.
+            print(f"delete_message_batch: {len(failed)} of {len(entries)} "
+                  f"failed: {failed[0].get('Code')} "
+                  f"{failed[0].get('Message', '')[:200]}", file=sys.stderr)
     set_state(conn, "last_drain", {"at": time.time(), "recorded": recorded})
     conn.commit()
     return recorded, seen
@@ -543,11 +559,13 @@ def main():
         if args.mode == "drain":
             recorded, seen = drain(conn)
             passes = apply_passes(conn)
+            used = resource.getrusage(resource.RUSAGE_SELF)
             print(f"drained {seen} messages, recorded {recorded} objects; "
                   f"applied {passes['applied']} sweep passes retiring "
                   f"{passes['retired']} objects"
                   + (f"; {passes['rejected']} rejected"
-                     if passes["rejected"] else ""))
+                     if passes["rejected"] else "")
+                  + f"; cpu {used.ru_utime + used.ru_stime:.1f}s")
         elif args.mode == "reconcile":
             print(json.dumps(reconcile(conn), indent=2))
         elif args.mode == "apply":
