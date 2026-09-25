@@ -188,8 +188,16 @@ def refresh_for(user) -> bool | None:
     """
     token = github_token(user)
     if not token:
-        # A local account, with no GitHub identity to observe. Its access was
-        # established inside the BNL perimeter and is carried by `rights`.
+        login = github_login(user)
+        if login:
+            # A GitHub account without a stored token cannot be observed; say
+            # so, since this is where every sign-in went silent until
+            # SOCIALACCOUNT_STORE_TOKENS was set.
+            logger.warning(f"authority: no stored GitHub token for {user} "
+                           f"({login}); membership not observed")
+        # Otherwise a local account, with no GitHub identity to observe. Its
+        # access was established inside the BNL perimeter and is carried by
+        # `rights`.
         return None
     member = resolve_membership(token)
     if member is None:

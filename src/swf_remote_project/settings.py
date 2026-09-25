@@ -155,6 +155,11 @@ ACCOUNT_EMAIL_VERIFICATION = 'none'
 # Provider sign-in is reached by POST from the login page, so a third party
 # cannot start the flow with a bare link.
 SOCIALACCOUNT_LOGIN_ON_GET = False
+# Keep each GitHub OAuth token: the sign-in sweep (remote_app/authority.py)
+# resolves `eic` membership with the person's own read:org token. allauth 65
+# stores none by default, and without one the sweep has nothing to ask with
+# (2026-09-25: no membership written for any sign-in after the 9/9 backfill).
+SOCIALACCOUNT_STORE_TOKENS = True
 # Identities that carry trust to swf-monitor over the tunnel, and so must
 # never become a person's account name. GitHub logins are otherwise adopted as
 # Django usernames on first sign-in, and a proxied request is identified to

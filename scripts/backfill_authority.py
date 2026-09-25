@@ -31,6 +31,12 @@ Dry run by default. Pass --apply to write.
 
     scripts/backfill_authority.py
     scripts/backfill_authority.py --apply
+
+--eic-only re-observes membership for every GitHub-linked account and writes
+`eic` alone, as a sign-in would; it never writes `rights`, so no grant or veto
+a person has made since the first backfill is touched.
+
+    scripts/backfill_authority.py --eic-only --apply
 """
 from __future__ import annotations
 
@@ -68,6 +74,8 @@ def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument('--apply', action='store_true',
                     help='write the attributes; otherwise report only')
+    ap.add_argument('--eic-only', action='store_true',
+                    help='re-observe membership of GitHub accounts; never write rights')
     args = ap.parse_args()
 
     org = settings.EIC_ORG
@@ -95,6 +103,10 @@ def main() -> int:
         else:
             plan.append((user.username, None, '', 'basic',
                          'no GitHub identity; established through the BNL account sync'))
+
+    if args.eic_only:
+        plan = [(name, eic, github, None, basis.split(';')[0])
+                for name, eic, github, _, basis in plan if eic is not None]
 
     width = max(len(name) for name, _, _, _, _ in plan)
     for name, eic, _, rights, basis in plan:
