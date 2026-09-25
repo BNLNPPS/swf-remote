@@ -22,6 +22,7 @@ Modes:
   apply      apply the sweeper's spooled pass records to the index
   guard      nightly: is this an explosion, and pull the plug if so
   summary    the state as JSON, for the Capcom tile and for a human
+  wipe       by hand: delete the prefix as of now, recorded as a pass
 Cron on ec2dev, admin's crontab: drain every five minutes under
 `flock -n` and `nice -n 19` (a run that finds the lock held exits; runs
 never stack), reconcile at 03:40 UTC, guard at 03:50 UTC.
@@ -243,8 +244,10 @@ def sweep_state(conn, now):
     turns absence into staleness, and it is set by hand when the far side
     says the first real pass is imminent.
     """
+    # A gateway wipe is recorded as a pass but says nothing of the sweeper.
     last_pass = conn.execute(
-        "SELECT MAX(applied_at) FROM passes").fetchone()[0]
+        "SELECT MAX(applied_at) FROM passes "
+        "WHERE COALESCE(reporter, '') != 'gateway-wipe'").fetchone()[0]
     if last_pass:
         if now - last_pass > PASS_STALL_SECONDS:
             return last_pass, (f"no sweep pass reported for "
@@ -471,35 +474,89 @@ def guard(conn, arm=True):
     return outcome
 
 
-def reporting_key_id():
-    """The reporting user's access key id, from IAM rather than from the
-    credential file, so the guard acts on what is actually enabled."""
-    keys = aws("iam", "list-access-keys", "--user-name", REPORTING_USER,
+def reporting_keys():
+    """The reporting user's access keys, from IAM rather than from the
+    credential file, so the guard acts on what is actually enabled. The
+    user may hold two: a retired key left Inactive beside its successor
+    (2026-09-24, the Event Service key), so every key is considered."""
+    return aws("iam", "list-access-keys", "--user-name", REPORTING_USER,
                "--output", "json").get("AccessKeyMetadata", [])
-    return keys[0]["AccessKeyId"] if keys else None
 
 
 def key_status():
+    """Active if any of the user's keys can write, else Inactive."""
     try:
-        keys = aws("iam", "list-access-keys", "--user-name", REPORTING_USER,
-                   "--output", "json").get("AccessKeyMetadata", [])
-        return keys[0]["Status"] if keys else "Missing"
+        keys = reporting_keys()
     except RuntimeError as exc:
         print(f"key status unreadable: {exc}", file=sys.stderr)
         return "Unknown"
+    if not keys:
+        return "Missing"
+    return ("Active" if any(k["Status"] == "Active" for k in keys)
+            else "Inactive")
 
 
 def disable_reporting_key():
-    """Pull the plug. Reversible with one command, named in the notice."""
-    key_id = reporting_key_id()
-    if not key_id:
-        raise RuntimeError(f"no access key found for {REPORTING_USER}")
-    aws("iam", "update-access-key", "--user-name", REPORTING_USER,
-        "--access-key-id", key_id, "--status", "Inactive", parse=False)
-    print(f"DISABLED reporting key {key_id}; re-enable with: "
-          f"aws iam update-access-key --user-name {REPORTING_USER} "
-          f"--access-key-id {key_id} --status Active", file=sys.stderr)
-    return key_id
+    """Pull the plug on every active key. Reversible with one command per
+    key, named in the notice."""
+    active = [k["AccessKeyId"] for k in reporting_keys()
+              if k["Status"] == "Active"]
+    if not active:
+        raise RuntimeError(f"no active access key found for {REPORTING_USER}")
+    for key_id in active:
+        aws("iam", "update-access-key", "--user-name", REPORTING_USER,
+            "--access-key-id", key_id, "--status", "Inactive", parse=False)
+        print(f"DISABLED reporting key {key_id}; re-enable with: "
+              f"aws iam update-access-key --user-name {REPORTING_USER} "
+              f"--access-key-id {key_id} --status Active", file=sys.stderr)
+    return active
+
+
+def wipe(conn, reason):
+    """Delete every object under the prefix written before this run began,
+    retire their rows, and record the deletion as a pass.
+
+    For the gateway's own clearances (2026-09-24: the 9/15-9/18 flood,
+    cleared on Torre's word). The record goes where the sweeper's do, so
+    the index and the guard read a wipe as a known drain and not as
+    missing events; objects written during the run are left alone.
+    """
+    import boto3
+    s3 = boto3.client("s3", region_name=REGION)
+    started = time.time()
+    deleted = errors = 0
+    paginator = s3.get_paginator("list_objects_v2")
+    for page in paginator.paginate(Bucket=BUCKET, Prefix=PREFIX):
+        keys = [item["Key"] for item in page.get("Contents", [])
+                if item["LastModified"].timestamp() < started]
+        if not keys:
+            continue
+        reply = s3.delete_objects(
+            Bucket=BUCKET,
+            Delete={"Objects": [{"Key": k} for k in keys], "Quiet": True})
+        failed = {e["Key"] for e in reply.get("Errors", [])}
+        if failed:
+            errors += len(failed)
+            first = reply["Errors"][0]
+            print(f"delete_objects: {len(failed)} failed: {first.get('Code')} "
+                  f"{first.get('Message', '')[:200]}", file=sys.stderr)
+        gone = [k for k in keys if k not in failed]
+        conn.executemany("DELETE FROM objects WHERE key = ?",
+                         [(k,) for k in gone])
+        conn.commit()
+        deleted += len(gone)
+    pass_id = time.strftime("wipe-%Y%m%dT%H%M%SZ", time.gmtime(started))
+    window_to = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(started))
+    conn.execute(
+        "INSERT INTO passes (pass_id, reporter, outcome, reason, "
+        "window_from, window_to, jobs_filed, keys_read, keys_unread, "
+        "retired, received_at, applied_at) "
+        "VALUES (?, 'gateway-wipe', ?, ?, NULL, ?, 0, 0, ?, ?, ?, ?)",
+        (pass_id, "partial" if errors else "ok", reason, window_to,
+         deleted, deleted, window_to, time.time()))
+    conn.commit()
+    return {"pass_id": pass_id, "deleted": deleted, "failed": errors,
+            "seconds": round(time.time() - started)}
 
 
 def summary(conn):
@@ -550,9 +607,11 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument(
         "mode",
-        choices=("drain", "reconcile", "apply", "guard", "summary"))
+        choices=("drain", "reconcile", "apply", "guard", "summary", "wipe"))
     parser.add_argument("--no-arm", action="store_true",
                         help="report a breach without disabling the key")
+    parser.add_argument("--reason", default="gateway wipe",
+                        help="wipe: why, recorded with the pass")
     args = parser.parse_args()
     conn = db()
     try:
@@ -572,6 +631,8 @@ def main():
             print(json.dumps(apply_passes(conn), indent=2))
         elif args.mode == "guard":
             print(json.dumps(guard(conn, arm=not args.no_arm), indent=2))
+        elif args.mode == "wipe":
+            print(json.dumps(wipe(conn, args.reason), indent=2))
         else:
             print(json.dumps(summary(conn), indent=2))
     finally:
