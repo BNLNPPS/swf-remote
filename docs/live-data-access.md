@@ -168,15 +168,16 @@ Every GitHub sign-in ends in one of two writes: the observation, accepted by
 swf-monitor, or a report that the check reached no answer (no stored OAuth
 token, GitHub unanswered, the write refused). The report leaves the stored
 `eic` alone rather than recording a negative and revoking an account that
-still holds its access. It is surfaced three ways: the person's account menu
-states that membership could not be checked, swf-monitor records it for its
-`authority_check` alarm and User admin page, and the log carries it at ERROR.
-The next completed check clears it.
+still holds its access. It is surfaced three ways: a red "membership not
+checked" beside the username in the nav, swf-monitor's record (its
+`authority_check` alarm, User admin page and the person's account page), and
+the log at ERROR. The next completed check clears it.
 
-The account menu, beside the username on every page, states the GitHub login
-the account signed in with, whether it is an `eic` member and when that was
-checked, and for a non-member the joining procedure. It reads the latest check
-from `authority_status`, kept here so the menu costs no call upstream.
+The username in the nav links to the Account tab of the account page, which
+states the GitHub login the account signed in with, whether it is an `eic`
+member and when that was checked, a failed check with its reason, and for a
+non-member the joining procedure. The nav marker reads the latest check from
+`authority_status`, kept here so it costs no call upstream.
 OAuth tokens are stored for the check (`SOCIALACCOUNT_STORE_TOKENS`); from the
 9/9 backfill to 2026-09-25 they were not, and every sign-in skipped the check
 without a word. `scripts/backfill_authority.py --eic-only --apply`
