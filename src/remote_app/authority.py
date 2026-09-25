@@ -128,11 +128,23 @@ def resolve_membership(token: str, org: str | None = None) -> bool | None:
     return None
 
 
+def _save_status(username: str, **fields) -> None:
+    """Keep the account's latest check where the account menu reads it."""
+    from django.contrib.auth.models import User
+    from .models import AuthorityStatus
+
+    user = User.objects.filter(username=username).first()
+    if user is None:
+        return
+    AuthorityStatus.objects.update_or_create(user=user, defaults=fields)
+
+
 def record_membership(username: str, eic: bool | None, github: str = '') -> bool:
     """Record observed organization membership on the account in swf-monitor.
 
     This endpoint refuses `rights`, so no fault in the sign-in path can reach
-    a grant. `eic=None` clears the observation.
+    a grant. `eic=None` clears the observation. Only a write swf-monitor
+    accepted counts; the account menu's copy is updated after it.
     """
     if not username:
         return False
@@ -144,12 +156,42 @@ def record_membership(username: str, eic: bool | None, github: str = '') -> bool
         {'username': username, 'authority': attributes},
         as_user=SERVICE_USER,
     )
-    if isinstance(result, dict) and result.get('error'):
+    if not isinstance(result, dict) or result.get('error') \
+            or not isinstance(result.get('authority'), dict):
         logger.error(f"authority: recording {attributes} for {username} failed: "
-                     f"{result['error']}")
+                     f"{(result or {}).get('error') if isinstance(result, dict) else result!r}")
         return False
+    from django.utils import timezone
+    _save_status(username, github=github, eic=eic, checked_at=timezone.now(),
+                 failed='', failed_at=None)
     logger.info(f"authority: recorded {attributes} for {username}")
     return True
+
+
+def report_failure(username: str, reason: str, github: str = '') -> None:
+    """A GitHub sign-in whose check reached no answer: surface it everywhere.
+
+    The account menu shows it (local copy), swf-monitor records it for the
+    authority_check alarm and the User admin page, and the log carries it at
+    ERROR. The stored `eic` is left alone upstream: a check without an answer
+    is not an observation.
+    """
+    from django.utils import timezone
+    logger.error(f"authority: membership check for {username} ({github or 'no login'}) "
+                 f"reached no answer: {reason}")
+    _save_status(username, github=github, failed=reason, failed_at=timezone.now())
+    attributes: dict = {'check_failed': reason}
+    if github:
+        attributes['github'] = github
+    result = monitor_client._post(
+        AUTHORITY_PATH,
+        {'username': username, 'authority': attributes},
+        as_user=SERVICE_USER,
+    )
+    if not isinstance(result, dict) or result.get('error'):
+        # The monitor's alarm still catches an account with no record at all.
+        logger.error(f"authority: reporting the failed check for {username} "
+                     f"upstream failed too: {result!r}")
 
 
 def record_rights(username: str, rights: str | None) -> bool:
@@ -184,25 +226,32 @@ def refresh_for(user) -> bool | None:
     account pages can show which identity was tested — several accounts carry
     a Django username unlike their GitHub login. Never writes `rights`.
 
-    Returns the membership observed, or None when nothing was written.
+    Every GitHub-linked account ends in one of two outcomes: a membership
+    write swf-monitor accepted, or a reported failure (report_failure). From
+    the 9/9 backfill to 9/25 every sign-in took a third, silent path — no
+    token was stored, and this function returned without a word.
+
+    Returns the membership observed, or None when nothing was observed.
     """
+    login = github_login(user) or ''
     token = github_token(user)
     if not token:
-        login = github_login(user)
         if login:
-            # A GitHub account without a stored token cannot be observed; say
-            # so, since this is where every sign-in went silent until
-            # SOCIALACCOUNT_STORE_TOKENS was set.
-            logger.warning(f"authority: no stored GitHub token for {user} "
-                           f"({login}); membership not observed")
+            report_failure(user.username, 'no stored GitHub token for the '
+                           'account, so membership could not be asked', login)
         # Otherwise a local account, with no GitHub identity to observe. Its
         # access was established inside the BNL perimeter and is carried by
         # `rights`.
         return None
     member = resolve_membership(token)
     if member is None:
+        report_failure(user.username, 'GitHub did not answer the membership '
+                       'check (see the swf-remote log)', login)
         return None
-    record_membership(user.username, member, github_login(user) or '')
+    if not record_membership(user.username, member, login):
+        report_failure(user.username, 'swf-monitor did not accept the '
+                       'membership write', login)
+        return None
     return member
 
 
@@ -213,5 +262,11 @@ def refresh_on_login(sender, request, user, **kwargs):
         refresh_for(user)
     except Exception as e:
         # Sign-in must not fail because the check did: the account keeps
-        # whatever it already holds.
+        # whatever it already holds, and the failure is reported like any
+        # other check that reached no answer.
         logger.error(f"authority: refresh on login for {user} failed: {e}")
+        try:
+            report_failure(user.username, f'the check raised {type(e).__name__}',
+                           github_login(user) or '')
+        except Exception as inner:
+            logger.error(f"authority: reporting that failure raised too: {inner}")

@@ -164,9 +164,23 @@ tested. The `read:org` scope is required for that call: organization
 membership is private by default, and without the scope a member is
 indistinguishable from a non-member.
 
-A check that cannot reach an answer writes nothing. A network failure or a
-revoked token leaves the stored value alone rather than recording a negative
-and revoking an account that still holds its access.
+Every GitHub sign-in ends in one of two writes: the observation, accepted by
+swf-monitor, or a report that the check reached no answer (no stored OAuth
+token, GitHub unanswered, the write refused). The report leaves the stored
+`eic` alone rather than recording a negative and revoking an account that
+still holds its access. It is surfaced three ways: the person's account menu
+states that membership could not be checked, swf-monitor records it for its
+`authority_check` alarm and User admin page, and the log carries it at ERROR.
+The next completed check clears it.
+
+The account menu, beside the username on every page, states the GitHub login
+the account signed in with, whether it is an `eic` member and when that was
+checked, and for a non-member the joining procedure. It reads the latest check
+from `authority_status`, kept here so the menu costs no call upstream.
+OAuth tokens are stored for the check (`SOCIALACCOUNT_STORE_TOKENS`); from the
+9/9 backfill to 2026-09-25 they were not, and every sign-in skipped the check
+without a word. `scripts/backfill_authority.py --eic-only --apply`
+re-observes every GitHub account and writes `eic` alone.
 
 Enforcement belongs to swf-monitor and is described there. It applies to
 requests made by a person: a browser session, or a tunnel identity resolving to

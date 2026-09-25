@@ -183,3 +183,28 @@ class TeamCommsAuthReference(models.Model):
 
     class Meta:
         db_table = 'teamcomms_auth_reference'
+
+
+class AuthorityStatus(models.Model):
+    """The latest sign-in membership check for an account, as the person sees it.
+
+    Written by remote_app/authority.py at every check: the GitHub login it was
+    made against, the `eic` answer and when, or why it reached no answer. The
+    record of authority lives in swf-monitor (docs/AUTHORITY.md there); this
+    copy exists so the account menu, rendered here on every page, can state it
+    without a call upstream.
+    """
+
+    user = models.OneToOneField('auth.User', on_delete=models.CASCADE,
+                                primary_key=True, related_name='authority_status')
+    github = models.CharField(max_length=100, blank=True, default='')
+    eic = models.BooleanField(null=True)
+    checked_at = models.DateTimeField(null=True, blank=True)
+    failed = models.CharField(max_length=500, blank=True, default='')
+    failed_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        db_table = 'authority_status'
+
+    def __str__(self):
+        return f'{self.user.username}: eic={self.eic} failed={bool(self.failed)}'

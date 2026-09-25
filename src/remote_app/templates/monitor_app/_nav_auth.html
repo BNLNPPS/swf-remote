@@ -1,6 +1,30 @@
-<div class="nav-auth">
+{% load authority_status %}<div class="nav-auth">
     {% if user.is_authenticated %}
-        <a href="{% url 'monitor_app:account' %}{% if request.GET.user_view == '1' %}?user_view=1{% endif %}">{{ user.username }}</a>
+        {% authority_status as st %}
+        <div class="dropdown" style="margin-right:0;">
+            <a href="{% url 'monitor_app:account' %}{% if request.GET.user_view == '1' %}?user_view=1{% endif %}">{{ user.username }}</a>{% if st.state == 'failed' or st.state == 'unchecked' %} <span style="color:#ffb4a8;font-weight:600;">membership not checked</span>{% endif %}
+            <div class="dropdown-content" style="right:0;left:auto;min-width:330px;max-width:420px;padding:12px 16px;color:#111;font-size:.95rem;line-height:1.45;white-space:normal;text-align:left;">
+                {% if st.state == 'local' %}
+                    <div>Local account: no GitHub identity. Authority comes from rights granted by operations.</div>
+                {% else %}
+                    <div>Signed in with GitHub: <strong>{{ st.github }}</strong></div>
+                    {% if st.state == 'member' %}
+                        <div style="margin-top:6px;">eic member: <strong>yes</strong>, checked {{ st.checked_at|date:"Y-m-d H:i T" }}</div>
+                    {% elif st.state == 'not-member' %}
+                        <div style="margin-top:6px;">eic member: <strong>no</strong>, checked {{ st.checked_at|date:"Y-m-d H:i T" }}</div>
+                        <div style="margin-top:6px;">Your GitHub account {{ st.github }} is not a member of the <strong>eic</strong> organization. Actions against the production system require membership; reading monitoring information does not. The joining procedure is on the <a href="https://eic.github.io/documentation/getstarted.html" style="display:inline;padding:0;color:#0645ad;text-decoration:underline;">ePIC Software &amp; Computing Get Started page</a>, under "Join GitHub". Once you have been added, sign in again.</div>
+                    {% elif st.state == 'failed' %}
+                        <div style="margin-top:6px;color:#a4001d;font-weight:600;">eic membership could not be checked{% if st.failed_at %} ({{ st.failed_at|date:"Y-m-d H:i T" }}){% endif %}.</div>
+                        <div style="margin-top:4px;">{{ st.failed }}. Reading is unaffected; actions stay off until a check completes. Operations has been alerted. Signing out and in again retries.</div>
+                        {% if st.checked_at %}<div style="margin-top:4px;">Last completed check: {{ st.checked_at|date:"Y-m-d H:i T" }}, eic member: {% if st.eic %}yes{% else %}no{% endif %}.</div>{% endif %}
+                    {% else %}
+                        <div style="margin-top:6px;color:#a4001d;font-weight:600;">eic membership has not been checked yet.</div>
+                        <div style="margin-top:4px;">Signing out and in again checks it.</div>
+                    {% endif %}
+                {% endif %}
+                <div style="margin-top:10px;"><a href="{% url 'monitor_app:account' %}{% if request.GET.user_view == '1' %}?user_view=1{% endif %}" style="display:inline;padding:0;color:#0645ad;text-decoration:underline;">Account page</a></div>
+            </div>
+        </div>
         <form method="post" action="{% url 'logout' %}" style="display:inline;margin:0;">{% csrf_token %}<button type="submit" style="background:none;border:none;color:inherit;cursor:pointer;padding:0;font:inherit;">Logout</button></form>
     {% else %}
         <a href="{% url 'login' %}?next={{ request.get_full_path|urlencode }}">Login</a>
