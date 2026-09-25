@@ -90,13 +90,21 @@ def github_login(user) -> str | None:
         return None
 
 
-def resolve_membership(token: str, org: str | None = None) -> bool | None:
-    """Whether the token's owner belongs to the organization.
+# Scopes under which /user/memberships can see a private membership.
+ORG_READ_SCOPES = {'read:org', 'write:org', 'admin:org'}
 
-    Returns True or False on a definite answer, None when the answer could not
-    be established. Uses the caller's own token against /user/memberships, so
-    a private membership — GitHub's default — is visible; this is what the
-    read:org scope is for.
+
+def check_membership(token: str, org: str | None = None) -> tuple[bool | None, str]:
+    """Whether the token's owner belongs to the organization, and if not
+    established, why.
+
+    Returns (True|False, '') on a definite answer and (None, reason) when the
+    answer could not be established. Uses the caller's own token against
+    /user/memberships, so a private membership — GitHub's default — is
+    visible, but only to a token carrying read:org. Without it a private
+    member reads as absent, so a 404 is believed only from a token whose
+    X-OAuth-Scopes include an org-read scope: every token issued before the
+    scope was requested would otherwise record members as non-members.
     """
     org = org or settings.EIC_ORG
     url = f'{GITHUB_API}/user/memberships/orgs/{org}'
@@ -107,25 +115,38 @@ def resolve_membership(token: str, org: str | None = None) -> bool | None:
         })
     except Exception as e:
         logger.error(f"authority: GitHub membership check failed: {e}")
-        return None
+        return None, f'GitHub could not be reached ({type(e).__name__})'
 
+    scopes = {s.strip() for s in resp.headers.get('X-OAuth-Scopes', '').split(',')
+              if s.strip()}
+    if resp.status_code in (200, 404) and not scopes & ORG_READ_SCOPES:
+        return None, ('the GitHub token lacks the read:org scope, so a private '
+                      'membership cannot be seen; sign in again to grant it')
     if resp.status_code == 200:
         state = (resp.json() or {}).get('state')
         if state == 'active':
-            return True
+            return True, ''
         # 'pending' is an unaccepted invitation — not yet a member.
         logger.info(f"authority: membership state '{state}' for org {org}")
-        return False
+        return False, ''
     if resp.status_code == 404:
-        return False
+        return False, ''
     if resp.status_code in (401, 403):
-        logger.error(
-            f"authority: GitHub returned {resp.status_code} for {url} — the "
-            f"token is missing the read:org scope, or was revoked; leaving "
-            f"the stored value alone")
-        return None
-    logger.error(f"authority: GitHub {resp.status_code} for {url}")
-    return None
+        detail = ''
+        try:
+            detail = str((resp.json() or {}).get('message', ''))[:200]
+        except Exception:
+            pass
+        return None, (f'GitHub refused the membership check ({resp.status_code}'
+                      f'{": " + detail if detail else ""}); the token may be '
+                      f'revoked, or the {org} organization has not approved '
+                      f'this application')
+    return None, f'GitHub answered the membership check with {resp.status_code}'
+
+
+def resolve_membership(token: str, org: str | None = None) -> bool | None:
+    """check_membership without the reason."""
+    return check_membership(token, org)[0]
 
 
 def _save_status(username: str, **fields) -> None:
@@ -243,10 +264,9 @@ def refresh_for(user) -> bool | None:
         # access was established inside the BNL perimeter and is carried by
         # `rights`.
         return None
-    member = resolve_membership(token)
+    member, reason = check_membership(token)
     if member is None:
-        report_failure(user.username, 'GitHub did not answer the membership '
-                       'check (see the swf-remote log)', login)
+        report_failure(user.username, reason, login)
         return None
     if not record_membership(user.username, member, login):
         report_failure(user.username, 'swf-monitor did not accept the '
