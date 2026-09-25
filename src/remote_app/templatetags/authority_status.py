@@ -33,6 +33,7 @@ def authority_status(context):
     return {
         'state': state,
         'github': login,
+        'eic': status.eic if status else None,
         'checked_at': status.checked_at if status else None,
         'failed': status.failed if status else '',
         'failed_at': status.failed_at if status else None,
