@@ -2,7 +2,8 @@
 """Index of the devcloud stage-out bucket, learned from the bucket's own events.
 
 The gateway knows what is in the bucket by being told: S3 emits an
-ObjectCreated event per report object to the epic-stageout-events queue,
+ObjectCreated event per report object (and per status write, counted by
+the hour rather than indexed) to the epic-stageout-events queue,
 this tool drains the queue into a local index, and the watch and the
 nightly cross-check read the index instead of listing S3. Listing a
 production-scale prefix every few minutes would cost about as much as
@@ -123,7 +124,18 @@ CREATE TABLE IF NOT EXISTS daily (
     bytes     INTEGER NOT NULL,
     at        REAL NOT NULL
 );
+CREATE TABLE IF NOT EXISTS status_writes (
+    hour      INTEGER PRIMARY KEY,
+    writes    INTEGER NOT NULL,
+    bytes     INTEGER NOT NULL
+);
 """
+
+# status/<pandaid>.json is one object per job, overwritten while the job
+# runs in PanDA debug mode (payload 0.22.0, call home; at most 150 writes a
+# job). Overwrites are the cost, so these events are counted per hour as
+# writes rather than indexed as objects; the guard adds them to its day.
+STATUS_PREFIX = "status/"
 
 # reports/<subject>/<sequence>.json — the subject is the PanDA job id once
 # the payload carries it; anything else is recorded as it arrives.
@@ -212,6 +224,14 @@ def drain(conn, max_batches=500):
                 obj = record.get("s3", {}).get("object", {})
                 key = obj.get("key")
                 if not key:
+                    continue
+                if key.startswith(STATUS_PREFIX):
+                    conn.execute(
+                        "INSERT INTO status_writes (hour, writes, bytes) "
+                        "VALUES (?, 1, ?) ON CONFLICT(hour) DO UPDATE SET "
+                        "writes = writes + 1, bytes = bytes + excluded.bytes",
+                        (int(time.time() // 3600), int(obj.get("size") or 0)))
+                    recorded += 1
                     continue
                 conn.execute(
                     "INSERT INTO objects (key, size, etime, subject, seen_at) "
@@ -396,6 +416,10 @@ def guard(conn, arm=True):
     day_objects, day_bytes = conn.execute(
         "SELECT COUNT(*), COALESCE(SUM(size), 0) FROM objects "
         "WHERE seen_at > ?", (now - 86400,)).fetchone()
+    # Status overwrites are writes like any report's, on the same key.
+    status_writes, status_bytes = status_since(conn, now, 24)
+    day_objects += status_writes
+    day_bytes += status_bytes
     # The trailing norm, excluding the last day, over whatever history
     # the index holds. Expiry keeps that to about a week.
     prior_days = conn.execute(
@@ -462,6 +486,7 @@ def guard(conn, arm=True):
 
     outcome = {"at": now, "day_objects": day_objects,
                "day_bytes": day_bytes,
+               "day_status_writes": status_writes,
                "history": history[:14],
                "week_over_week": growth,
                "norm_objects_per_day": round(norm_per_day),
@@ -472,6 +497,14 @@ def guard(conn, arm=True):
     set_state(conn, "last_guard", outcome)
     conn.commit()
     return outcome
+
+
+def status_since(conn, now, hours):
+    """(writes, bytes) to the status prefix over the last `hours` hours."""
+    return conn.execute(
+        "SELECT COALESCE(SUM(writes), 0), COALESCE(SUM(bytes), 0) "
+        "FROM status_writes WHERE hour > ?",
+        (int(now // 3600) - hours,)).fetchone()
 
 
 def reporting_keys():
@@ -568,6 +601,10 @@ def summary(conn):
                         (now - 3600,)).fetchone()[0]
     day = conn.execute("SELECT COUNT(*) FROM objects WHERE seen_at > ?",
                        (now - 86400,)).fetchone()[0]
+    status_hour = status_since(conn, now, 1)[0]
+    status_day = status_since(conn, now, 24)[0]
+    hour += status_hour
+    day += status_day
     busiest = conn.execute(
         "SELECT subject, COUNT(*) c FROM objects WHERE seen_at > ? "
         "GROUP BY subject ORDER BY c DESC LIMIT 1", (now - 86400,)).fetchone()
@@ -593,6 +630,7 @@ def summary(conn):
             "the reporting key is disabled: "
             + "; ".join(last_guard.get("breaches") or ["stopped by the guard"]))
     return {"objects": total, "last_hour": hour, "last_day": day,
+            "status_last_hour": status_hour, "status_last_day": status_day,
             "guard": last_guard,
             "last_sweep_pass": last_pass,
             "busiest_subject": busiest[0] if busiest else None,
