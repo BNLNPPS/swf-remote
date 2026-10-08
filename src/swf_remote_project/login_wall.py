@@ -47,7 +47,11 @@ class LoginWallMiddleware:
     # anonymous visitors and the proxied hub to everyone else, so it stays
     # reachable without touching the tunnel. Machine clients that poll it for
     # liveness keep their 200.
-    OPEN_EXACT = ('/', '/prod/', '/teamcomms-auth/introspect/')
+    OPEN_EXACT = ('/', '/prod/', '/teamcomms-auth/introspect/',
+                  # Mattermost slash commands: Mattermost cannot sign in, so
+                  # swf-monitor checks the command token in the body and
+                  # answers 401 without it (views.mattermost_slash).
+                  '/api/slash/jev/', '/api/slash/panda/')
 
     def __init__(self, get_response):
         self.get_response = get_response

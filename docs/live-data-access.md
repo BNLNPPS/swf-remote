@@ -93,6 +93,19 @@ request references at devcloud for admission and stream revalidation; token
 values and session cookies remain here. The token issuance page can bind an AI
 identity to the account. See [TeamComms integration](teamcomms.md).
 
+### Mattermost slash commands
+
+Mattermost on `chat.epic-eic.org` posts its slash commands to
+`/prod/api/slash/jev/` and `/prod/api/slash/panda/` with no session and cannot
+follow a login redirect. The login wall leaves those two exact paths open
+(`OPEN_EXACT`), and `views.mattermost_slash` accepts POST only, forwards the
+form body unchanged to swf-monitor's `/api/slash/<command>/` over the tunnel as
+an anonymous request, and returns its status and JSON unchanged. swf-monitor
+authenticates the per-command token in the body and answers 401
+`{"text": "Unauthorized."}` without it. It answers at once, within Mattermost's
+3 s limit; a slow `/jev` reply is posted later to the `response_url` by the
+production operations agent, which does not pass through swf-remote.
+
 ### Canary browser controls
 
 The `/canary/` proxy carries the probe page and its JSON controls at

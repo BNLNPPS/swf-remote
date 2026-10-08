@@ -28,6 +28,13 @@ urlpatterns = [
     path('api/stageout/sweep-pass/', views.stageout_sweep_pass,
          name='stageout_sweep_pass'),
 
+    # Mattermost slash commands from chat.epic-eic.org: POST only, the
+    # per-command token in the body checked by swf-monitor.
+    path('api/slash/jev/', views.mattermost_slash, {'command': 'jev'},
+         name='slash_jev'),
+    path('api/slash/panda/', views.mattermost_slash, {'command': 'panda'},
+         name='slash_panda'),
+
     # epicprod AI pages — proxied from swf-monitor
     re_path(r'^ai/', views.ai_proxy, name='ai_proxy_all'),
     re_path(r'^logs/', views.logs_proxy, name='logs_proxy_all'),

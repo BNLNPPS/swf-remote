@@ -405,6 +405,29 @@ def panda_view_text(request):
     return HttpResponse(''.join(parts), content_type='text/plain; charset=utf-8')
 
 
+# ── Mattermost slash commands ────────────────────────────────────────────────
+
+SLASH_COMMANDS = ('jev', 'panda')
+
+
+@csrf_exempt
+def mattermost_slash(request, command):
+    """Relay a Mattermost slash command (chat.epic-eic.org) to swf-monitor.
+
+    Mattermost posts the command form (token, text, user_name, channel_id,
+    response_url, ...) with no session and cannot follow a login redirect, so
+    the login wall leaves these two exact paths open and swf-monitor
+    authenticates the per-command token in the body, answering 401 without
+    it. The body is forwarded as-is and the monitor's status and JSON returned
+    unchanged (docs/live-data-access.md, Mattermost slash commands).
+    """
+    if command not in SLASH_COMMANDS:
+        return JsonResponse({'text': 'Unknown command.'}, status=404)
+    if request.method != 'POST':
+        return HttpResponseNotAllowed(['POST'])
+    return monitor_client.proxy(request, f'/api/slash/{command}/')
+
+
 # ── Stage-out sweep ingest ───────────────────────────────────────────────────
 
 # The accounts allowed to report a sweep pass. The gateway owns the bucket
