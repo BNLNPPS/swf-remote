@@ -80,11 +80,10 @@ cd src && ../.venv/bin/python manage.py runserver
 ### Production
 
 ```bash
-# Full deploy: rsync, venv, deps, symlinks, migrations, Apache, SSL
+# Full setup: rsync, venv, deps, symlinks, migrations. Apache and TLS belong to the host's ingress: the site is
+# served by ePIC's own Apache instance behind Caddy, managed in tjrepo ops/ec2dev/apache-epic and
+# ops/ec2dev/caddy (README § The two Apache instances).
 bash deploy/setup-apache.sh
-
-# SSL (after DNS is pointing to the server)
-sudo certbot --apache -d epic-devcloud.org
 ```
 
 ### SSH tunnel

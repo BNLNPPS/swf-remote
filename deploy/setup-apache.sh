@@ -93,16 +93,16 @@ echo "Static files collected"
 
 # ── Apache config ───────────────────────────────────────────────────────────
 
-sudo cp "$DEPLOY_DIR/deploy/epic-devcloud.conf" /etc/apache2/sites-available/
-sudo a2ensite epic-devcloud.conf
-sudo systemctl reload apache2
-echo "Apache configured and reloaded"
+# epic-devcloud.org's vhost is managed in tjrepo ops/ec2dev/apache-epic/ and served by ePIC's own Apache instance,
+# apache2@epic, behind Caddy, which owns public TLS (tjrepo ops/ec2dev/caddy/README.md § The two Apache instances).
+# Installing deploy/epic-devcloud.conf into /etc/apache2 would put the site in the personal instance beside
+# etaverse, so this step installs nothing and reloads nothing.
+echo "Apache: managed in tjrepo ops/ec2dev/apache-epic (ops/ec2dev/bin/apply-ingress-config.sh); nothing installed here"
 
 # ── SSL certificate ─────────────────────────────────────────────────────────
 
 echo ""
-echo "To add HTTPS (after DNS is pointing here):"
-echo "  sudo certbot --apache -d $DOMAIN"
+echo "HTTPS is Caddy's (tjrepo ops/ec2dev/caddy/README.md); no certbot step."
 echo ""
 echo "=== Setup complete ==="
 echo "Site: http://$DOMAIN/"
