@@ -127,7 +127,7 @@ The monitor uses the same value as `SWF_TEAMCOMMS_SERVICE_TOKEN` and the public
 introspection URL as `SWF_TEAMCOMMS_INTROSPECTION_URL`.
 
 `deploy/update_from_dev.sh` applies Django migrations, including
-`0008_teamcomms_auth` and `0009_teamcomms_service_kind`, before collecting static assets and reloading Apache.
+`0008_teamcomms_auth` and `0009_teamcomms_service_kind`, before collecting static assets and restarting swf-remote's mod_wsgi daemon group.
 Coordinate deployment with the monitor integration. Validate browser identity,
 token identity, CSRF rejection, stream delivery/replay and revocation through
 the public URL. Live Claude/Codex acceptance is tracked in

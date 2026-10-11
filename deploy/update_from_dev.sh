@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Sync swf-remote to /var/www/swf-remote, collectstatic, reload apache
+# Sync swf-remote to /var/www/swf-remote, collectstatic, restart its mod_wsgi daemon group
 set -euo pipefail
 
 REPO_ROOT=$(cd "$(dirname "$0")/.." && pwd)
@@ -15,8 +15,7 @@ find "$TARGET_DIR" -path "$TARGET_DIR/.venv" -prune -o -type f -exec sudo chmod 
 "$VENV/bin/python" "$TARGET_DIR/src/manage.py" migrate --noinput
 "$VENV/bin/python" "$TARGET_DIR/src/manage.py" collectstatic --noinput
 
-# Touch WSGI script to trigger mod_wsgi daemon process reload
+# Touching the WSGI script restarts swf-remote's mod_wsgi daemon group alone. Apache is never reloaded:
+# the same Apache serves etaverse, epic-devcloud's /prod and /doc, primus and pax-eden, and a reload restarts every daemon group in it.
 touch "$TARGET_DIR/src/swf_remote_project/wsgi_subpath.py"
-
-sudo systemctl reload apache2
-echo "Deployment complete. Apache reloaded."
+echo "Deployment complete. swf-remote restarted."
