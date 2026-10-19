@@ -1,9 +1,12 @@
-# swf-remote AI Guidelines
+# swf-remote
 
-External PanDA monitoring frontend for the ePIC experiment. Consumes
-swf-monitor REST endpoints via SSH tunnel from pandaserver02 at BNL.
-
-Sister project to swf-monitor, swf-testbed, swf-common-lib.
+Start from the SWF workspace guide, `../swf-testbed/CLAUDE.md`
+(<https://github.com/BNLNPPS/swf-testbed/blob/main/CLAUDE.md>): the
+system, the workspace, how to work, production and collaboration. This
+file adds what is particular to swf-remote, the external face of the
+platform at epic-devcloud.org: it consumes swf-monitor's pages, REST
+endpoints and MCP server through an SSH tunnel from pandaserver02 at BNL,
+and adds devcloud sign-in, per-user tokens and TeamComms.
 
 TeamComms authentication, proxying and deployment: `docs/teamcomms.md`.
 
