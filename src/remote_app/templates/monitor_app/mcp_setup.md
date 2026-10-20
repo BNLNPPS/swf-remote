@@ -1,9 +1,10 @@
 {% autoescape off %}# ePIC Production Monitor MCP endpoint
 
 {{ mcp_url }} is a Model Context Protocol (MCP) server exposing the ePIC
-production monitor's tools: PanDA production state, physics configurations,
-campaign status, Snapper operational history, alarms, and the JLab and BNL
-Rucio catalogs. Transport is HTTP POST JSON-RPC. Each call is authenticated
+production monitor's tools: PanDA production state and crash investigation,
+physics configurations, testbed state and controls, campaign status,
+Snapper operational history, alarms, and the JLab and BNL Rucio catalogs.
+Transport is HTTP POST JSON-RPC. Each call is authenticated
 as the person whose token it carries.
 
 ## Setup
@@ -20,13 +21,14 @@ as the person whose token it carries.
    and a custom Authorization header is configured the same way.
 4. Call get_server_instructions first; the tools/list result is the catalog.
 
-The external face serves the read-only tools, PanDA production, physics
-configurations, campaigns, operational history, the Rucio catalogs, and AI
-content, plus one write: ai_propose_ping. It creates a proposal, not a
-ping: a dated obligation for the alarm system can be proposed in natural
-language at an LLM command line, and it becomes a ping only when a person
-approves the proposal on the alarm dashboard. Testbed control and
-production writes are not served outside BNL.
+The external face serves every monitor tool except ai_decide_proposal and
+epic_register_ai_assessment, which remain internal. State-changing tools,
+including testbed controls and PCS intake and lifecycle changes, apply the
+same authority checks as browser actions, under your account identity.
+
+ai_propose_ping creates a proposal: a dated obligation for the alarm
+system can be proposed in natural language at an LLM command line, and
+becomes a ping only when a person approves it on the alarm dashboard.
 
 What the tools cover, in human terms: the WFMS documentation,
 https://epic-wfms-docs.readthedocs.io/en/latest/apis/#mcp
