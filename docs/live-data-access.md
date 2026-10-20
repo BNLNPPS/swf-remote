@@ -118,21 +118,24 @@ Canary subtree. Successful controls return JSON rather than a login redirect.
 
 ### External tool set
 
-The relay serves the tools named in `remote_app/mcp_policy.py` and no
-others: a `tools/list` result is filtered to the set, and a `tools/call`
-for any other name is answered with a JSON-RPC error before it crosses the
-tunnel. The set is the read-only tools, PanDA production, PCS reads,
-campaign status and the action stream, Snapper history, the Rucio catalogs,
-and AI content, plus one write, `ai_propose_ping`. It creates a proposal,
-not a ping: a named collaborator anywhere can propose a dated obligation
-in natural language at an LLM command line, and it becomes a ping only
-when a person approves the proposal on the alarm dashboard. Not served: the
-testbed tools, which control and inspect internal processes; the PCS
-intake and lifecycle mutations, which the production bot drives; the
-proposal decision, whose approve executes the proposal; and assessment
-registration, written by the assessment services. A new monitor tool
-reaches the outside only when it is added to the set, the same opt-in
-principle the proxy applies to URLs.
+The token-secured relay serves every monitor tool except two:
+`ai_decide_proposal`, whose approve executes the proposal, and
+`epic_register_ai_assessment`, which belongs to the assessment services.
+This includes testbed inspection and control, PCS intake and lifecycle
+changes, PanDA crash findings and reproduction, storage, monitoring and
+history. MCP access follows the browser UI's identity and authority model:
+every state-changing tool is gated upstream in swf-monitor by
+`@requires_authority` and its `AUTHORITY_GUARDED_TOOLS` registry (17 tools,
+including the two internal tools). The relay forwards the authenticated
+caller's identity; reaching a tool does not grant authority to act.
+
+`remote_app/mcp_policy.py` keeps the explicit external set. A `tools/list`
+result is filtered to it, and a `tools/call` for any other name receives a
+JSON-RPC error before crossing the tunnel. Add each new monitor tool to
+this set in the same work unless Torre rules it internal.
+
+`ai_propose_ping` creates a proposal that becomes a ping only when a person
+approves it on the alarm dashboard; the decision tool remains internal.
 
 ## Authority for actions
 

@@ -1,16 +1,14 @@
 """The MCP tool set served on the external face (docs/live-data-access.md).
 
-The relay forwards only the tools named here: tools/list results are
-filtered to the set and a tools/call for any other name is refused before
-it crosses the tunnel. The set is the read-only tools plus one write,
-ai_propose_ping, which creates a proposal that takes effect only when a
-person accepts it on the alarm dashboard; it is the way a named collaborator
-raises an obligation from outside. Not served: the testbed tools (swf_*),
-which control and inspect internal processes; the PCS intake and lifecycle
-mutations, driven by the production bot; ai_decide_proposal, whose approve
-executes the proposal; and epic_register_ai_assessment, written by the
-assessment services. A new monitor tool reaches the outside only when it is
-added here.
+The external face serves every monitor tool except ai_decide_proposal,
+whose approve executes the proposal, and epic_register_ai_assessment,
+which belongs to the assessment services. Access is token-secured, and
+state-changing tools retain swf-monitor's upstream @requires_authority /
+AUTHORITY_GUARDED_TOOLS checks under the proxied caller's identity.
+
+The relay keeps an explicit set: tools/list results are filtered to it and
+any other tools/call is refused before crossing the tunnel. Add a new
+monitor tool here in the same work unless Torre rules it internal.
 """
 
 import json
@@ -27,22 +25,40 @@ _RUCIO = (
 EXTERNAL_TOOLS = frozenset(
     [
         'get_server_instructions',
-        # PanDA production, read-only
+        # PanDA production and crash investigation
         'panda_get_activity', 'panda_list_jobs', 'panda_diagnose_jobs',
         'panda_list_tasks', 'panda_error_summary', 'panda_study_job',
         'panda_list_queues', 'panda_get_queue', 'panda_resource_usage',
         'panda_harvester_workers',
-        # Physics Configuration System, reads
+        'panda_segfault_catalog', 'panda_segfault_findings',
+        'panda_segfault_signature', 'panda_segfault_finding_set',
+        'panda_segfault_reproduce',
+        # Physics Configuration System, reads and authority-gated writes
         'pcs_list_tags', 'pcs_get_tag', 'pcs_search_tags',
         'pcs_dataset_list', 'pcs_dataset_get', 'pcs_data_provenance',
         'pcs_prodtask_list', 'pcs_prodtask_get', 'pcs_prodtask_artifact',
+        'pcs_dataset_intake', 'pcs_prodtask_intake',
+        'pcs_prodtask_link_input', 'pcs_prodtask_set_status',
         # Campaigns and the action stream
-        'epicprod_campaign_status', 'epicprod_list_actions',
+        'epicprod_campaign_status', 'epicprod_list_actions', 'epicprod_storage',
+        # Testbed state and authority-gated controls
+        'swf_check_agent_manager', 'swf_end_execution', 'swf_get_agent',
+        'swf_get_ai_memory', 'swf_get_log_entry', 'swf_get_namespace',
+        'swf_get_run', 'swf_get_stf_file', 'swf_get_system_state',
+        'swf_get_testbed_status', 'swf_get_tf_slice',
+        'swf_get_workflow_execution', 'swf_get_workflow_monitor',
+        'swf_kill_agent', 'swf_list_agents', 'swf_list_available_tools',
+        'swf_list_logs', 'swf_list_messages', 'swf_list_namespaces',
+        'swf_list_runs', 'swf_list_stf_files', 'swf_list_tf_slices',
+        'swf_list_workflow_definitions', 'swf_list_workflow_executions',
+        'swf_list_workflow_monitors', 'swf_record_ai_memory',
+        'swf_send_message', 'swf_start_user_testbed', 'swf_start_workflow',
+        'swf_stop_user_testbed', 'swf_stop_workflow',
         # Snapper operational history
         'snapper_latest', 'snapper_state_at', 'snapper_component_history',
         'snapper_changes_between', 'snapper_context_around', 'snapper_series',
         'snapper_cut_summary',
-        # AI content and proposals: reads, and the one write, proposing a ping
+        # AI content and proposals
         'epic_get_ai_content', 'ai_list_proposals', 'ai_propose_ping',
     ]
     + [f'jlab_rucio_{s}' for s in _RUCIO]

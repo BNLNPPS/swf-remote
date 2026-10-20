@@ -22,8 +22,9 @@ Browser → epic-devcloud.org (Django/Apache)
   local `/prod/` paths and swaps in local auth controls. Same URL
   structure. Only swf-remote's own pages render locally (see
   *Local vs proxied pages*).
-- **MCP relay** at `/prod/mcp/` forwards swf-monitor's MCP endpoint, its
-  full tool set, through the tunnel as the signed-in user. Headless
+- **MCP relay** at `/prod/mcp/` forwards every swf-monitor tool except
+  `ai_decide_proposal` and `epic_register_ai_assessment`, through the tunnel
+  as the signed-in user, with state-changing tools authority-gated upstream. Headless
   clients authenticate with a per-user token (see *Live-data access*).
 - **No local PanDA data** — all data comes from swf-monitor in real time.
 - **TeamComms** — HTTP, MCP and streaming under `/prod/teamcomms/`, using
@@ -54,7 +55,7 @@ Browser → epic-devcloud.org (Django/Apache)
 | `/snapper/<scope>/report/` | Coherent operational state snaps and history |
 | `/snapper/<scope>/system/` | Snapper capture policy, scheduler, and component registry |
 | `/system/` | Aggregate SWF system health |
-| `/mcp/` | MCP relay to swf-monitor (POST JSON-RPC, token only), limited to the external tool set in `remote_app/mcp_policy.py`; GET serves the self-contained setup page |
+| `/mcp/` | Token-secured MCP relay: every monitor tool except `ai_decide_proposal` and `epic_register_ai_assessment`; state-changing tools retain upstream authority checks. GET serves the setup page |
 | `/account/tokens/` | Create and revoke API tokens |
 
 ## Setup
