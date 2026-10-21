@@ -117,10 +117,12 @@ other apps on the same server. See `.env.example`.
 
 ## Live-data access
 
-Every proxied page is built by swf-monitor and fetched over the tunnel, so
+Proxied pages are built by swf-monitor and fetched over the tunnel, so
 viewing one requires an account. Anonymous visitors reach a locally rendered
-landing page, the login path, and static assets; everything else redirects to
-sign-in. An account is established either by a local username and password or
+landing page, the login path, static assets and the cached computing-centre
+snapshot at `/prod/panda/comp/snapshot.json`. The snapshot permits browser
+reads from `https://etaverse.com` through its upstream CORS header.
+An account is established either by a local username and password or
 by signing in with GitHub, which creates it on first use. Signing in is all
 that reading requires. Acting on the production system requires authority,
 held as two attributes on the account in swf-monitor and enforced there:

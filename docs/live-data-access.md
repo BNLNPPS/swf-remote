@@ -17,16 +17,17 @@ WSGI pool and, through the shared Apache instance, the unrelated service at
 residential proxy network presenting one request per exit address.
 
 Access therefore depends on identity rather than on traffic signatures. A
-request that cannot present an account does not reach the tunnel.
+request that cannot present an account does not reach the tunnel, except
+for explicitly open cached records and independently authenticated interfaces.
 
 ## Access policy
 
-Signing in is required for every proxied surface: HTML pages, DataTables
+Signing in is required for proxied surfaces: HTML pages, DataTables
 requests, JSON endpoints, filter counts, and the REST proxies. Protecting only
 the initial HTML response would be insufficient, because a page issues further
 requests after it loads.
 
-Three paths remain open without an account:
+These basic paths remain open without an account:
 
 - the login page and the GitHub authorization callback, under `/accounts/`;
 - static assets, which are proxied and whose absence leaves the login page
@@ -36,6 +37,13 @@ Three paths remain open without an account:
 The landing page identifies the service and offers sign-in. Because it is
 local, an anonymous visitor — including a crawler — costs nothing upstream,
 and liveness pollers that watch `/prod/` continue to receive a 200 response.
+
+The computing-centre record at `/prod/panda/comp/snapshot.json` is an open
+cached product under `/panda/comp/`. It is read anonymously by the Etaverse
+world, with the upstream `Access-Control-Allow-Origin: https://etaverse.com`
+header relayed through the proxy. swf-monitor owns the cached snapshot and
+its once-a-minute background rebuild (docs/COMP_SNAPSHOT.md); an anonymous
+read does not request a page build.
 
 Machine clients that require current information use an authenticated service
 identity. Authorization does not depend on a User-Agent allowlist. Signed-in

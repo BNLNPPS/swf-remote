@@ -328,6 +328,9 @@ def proxy(request, path, service_user=None):
         # Downloads keep their upstream filename and attachment disposition.
         if 'content-disposition' in resp.headers:
             response['Content-Disposition'] = resp.headers['content-disposition']
+        # A swf-monitor view that may be read cross-origin says so itself.
+        if 'access-control-allow-origin' in resp.headers:
+            response['Access-Control-Allow-Origin'] = resp.headers['access-control-allow-origin']
         return response
     except httpx.ConnectError as e:
         logger.error(f"Cannot reach swf-monitor at {url}: {e}")

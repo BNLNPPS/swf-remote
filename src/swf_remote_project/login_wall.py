@@ -1,10 +1,9 @@
-"""Keep anonymous traffic off the tunnel.
+"""Gate anonymous traffic before it reaches the tunnel.
 
-Every page under /prod/ is rendered by swf-monitor at BNL and reached over the
-SSH tunnel, so an anonymous request that gets as far as a view costs an
-upstream page build. Refusing it here means it never crosses the tunnel at
-all, which is the point: enforcing the same rule upstream would still let the
-traffic arrive before rejecting it.
+Proxied pages under /prod/ are rendered by swf-monitor at BNL and reached over
+the SSH tunnel. Open cached records and independently authenticated endpoints
+are explicit exceptions below. Other anonymous requests are refused here
+before they cost an upstream page build.
 
 This runs as middleware rather than a per-view decorator because
 remote_app/urls.py ends in catch-all proxy routes, deliberately, so that new
@@ -25,6 +24,10 @@ class LoginWallMiddleware:
     OPEN_PREFIXES = (
         '/accounts/',   # login, logout, and the GitHub authorize callback
         '/static/',     # without this the login page renders unstyled
+        # The computing centre room's live record (swf-monitor
+        # docs/COMP_SNAPSHOT.md): read anonymously by the etaverse world;
+        # a cached product upstream, so an open read costs no build.
+        '/panda/comp/',
         # Validation interface (swf-epicprod EPICPROD_VALIDATION.md): open
         # read-only completion/catalog GETs, and the validation-results POST
         # whose token is validated upstream by swf-monitor.
