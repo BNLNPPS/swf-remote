@@ -151,6 +151,20 @@ The proxy (`monitor_client.proxy`) preserves swf-monitor's page body and
 `<style>`, rewriting only URLs and the auth controls — so swf-monitor's
 own nav and styling reach the browser intact on proxied pages.
 
+## Browser icon
+
+The red e favicon uses the lowercase letter outline from the collaboration's
+[ePIC logo](https://wiki.bnl.gov/EPIC/index.php?title=File:EPIC-logo_black.svg).
+`public/favicon.svg` is the vector asset; `public/favicon.ico` contains 16, 32
+and 48 pixel versions. `scripts/build_favicon.py` renders the fallback from
+the SVG with Chromium and Pillow.
+
+`DevcloudBrandingMiddleware` adds the same icon links to local and proxied
+HTML pages. It leaves streams, downloads and non-HTML responses unchanged.
+The deploy script installs both files into the existing host landing directory,
+where `/favicon.ico` also supplies the root and documentation pages. Apache
+configuration does not change.
+
 swf-remote keeps a symlink to swf-monitor's templates (created by
 `setup-dev.sh`) for the shared assets the local pages pull in. URL names
 use `app_name = 'monitor_app'` so `{% url %}` tags resolve to swf-remote's

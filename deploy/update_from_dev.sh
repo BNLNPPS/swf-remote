@@ -15,6 +15,11 @@ find "$TARGET_DIR" -path "$TARGET_DIR/.venv" -prune -o -type f -exec sudo chmod 
 "$VENV/bin/python" "$TARGET_DIR/src/manage.py" migrate --noinput
 "$VENV/bin/python" "$TARGET_DIR/src/manage.py" collectstatic --noinput
 
+# The host root is a static landing page, outside the /prod application.
+# Its conventional favicon also supplies /doc pages with the host identity.
+install -m 644 "$TARGET_DIR/public/favicon.svg" /var/www/epic-devcloud-landing/favicon.svg
+install -m 644 "$TARGET_DIR/public/favicon.ico" /var/www/epic-devcloud-landing/favicon.ico
+
 # Touching the WSGI script restarts swf-remote's mod_wsgi daemon group alone. Apache is never reloaded:
 # the same Apache serves etaverse, epic-devcloud's /prod and /doc, primus and pax-eden, and a reload restarts every daemon group in it.
 touch "$TARGET_DIR/src/swf_remote_project/wsgi_subpath.py"
