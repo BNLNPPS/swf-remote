@@ -55,6 +55,7 @@ Browser → epic-devcloud.org (Django/Apache)
 | `/snapper/<scope>/report/` | Coherent operational state snaps and history |
 | `/snapper/<scope>/system/` | Snapper capture policy, scheduler, and component registry |
 | `/system/` | Aggregate SWF system health |
+| `/help/whats-new/` | What's new — SWF developments, with votes and comments |
 | `/mcp/` | Token-secured MCP relay: every monitor tool except `ai_decide_proposal` and `epic_register_ai_assessment`; state-changing tools retain upstream authority checks. GET serves the setup page |
 | `/account/tokens/` | Create and revoke API tokens |
 

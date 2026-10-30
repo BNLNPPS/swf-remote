@@ -103,7 +103,7 @@ UPSTREAM_ROOT = b'/swf-monitor/'
 PRESERVED_UPSTREAM_ROOT = b'/\x00SWF_MONITOR_ROOT\x00/'
 
 PROXIED_REDIRECT_ROOTS = (
-    '/pcs/', '/panda/', '/ai/', '/logs/', '/alarms/', '/snapper/',
+    '/pcs/', '/panda/', '/ai/', '/help/', '/logs/', '/alarms/', '/snapper/',
 )
 
 

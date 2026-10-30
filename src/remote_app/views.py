@@ -78,6 +78,12 @@ def ai_proxy(request, **kwargs):
 
 
 @csrf_exempt
+def help_proxy(request, **kwargs):
+    """Proxy the epicprod Help pages (What's new) from swf-monitor."""
+    return monitor_client.proxy(request, request.path_info)
+
+
+@csrf_exempt
 def logs_proxy(request, **kwargs):
     """Proxy swf-monitor log pages from devcloud."""
     return monitor_client.proxy(request, request.path_info)
