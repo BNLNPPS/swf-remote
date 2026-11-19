@@ -114,9 +114,28 @@ cursors reach the monitor intact. TC streams reconnect within 25 seconds;
 the relay read timeout is 35 seconds. Downstream disconnect closes the upstream
 connection. Tunnel errors during a stream produce an explicit SSE error event.
 
-The relay currently runs in the existing mod_wsgi pool, with one worker thread
-occupied per stream. Deployment sizing must account for the number of connected
-sessions; the initial acceptance run uses a bounded set of clients.
+Each open stream occupies one worker thread for its life (§ Worker pools). The
+relay releases its database connection before streaming begins, so a held
+stream holds no connection to the shared PostgreSQL cluster.
+
+## Worker pools
+
+The ePIC Apache instance (tjrepo `ops/ec2dev/apache-epic/sites-enabled/epic-devcloud.conf`)
+runs swf-remote in three mod_wsgi daemon groups, chosen by path:
+
+| Group | Path | Size |
+|---|---|---|
+| `swf-remote-tcauth` | `/prod/teamcomms-auth/` | 1 process × 10 threads |
+| `swf-remote-tcstream` | `/prod/teamcomms/api/comms/stream` | 1 process × 30 threads |
+| `swf-remote` | everything else under `/prod` | 2 processes × 15 threads |
+
+Every relayed request holds a worker while the monitor calls back to the
+introspection endpoint, so the callback must never wait for a worker in the
+same pool: a burst such as a browser page loading its assets would otherwise
+queue the callbacks until the monitor's timeout, and the monitor answers 503.
+Streams have their own pool so that held streams cannot starve pages, API
+calls or the callback; when that pool is full, only new streams wait. Each
+group preloads the application. Touching the WSGI script restarts all three.
 
 ## Deployment
 

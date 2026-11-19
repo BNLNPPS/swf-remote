@@ -19,6 +19,7 @@ from django.conf import settings
 from django.contrib.auth import get_user
 from django.contrib.auth.views import redirect_to_login
 from django.core.exceptions import RequestDataTooBig
+from django.db import connection
 from django.http import HttpResponse, JsonResponse, StreamingHttpResponse
 from django.middleware.csrf import CsrfViewMiddleware, get_token
 from django.utils import timezone
@@ -220,7 +221,10 @@ def proxy(request, subpath=''):
         client = httpx.Client(timeout=TIMEOUT, verify=False, follow_redirects=False)
         upstream = client.send(client.build_request(request.method, url, headers=headers, content=body), stream=True)
         if upstream.headers.get('content-type', '').split(';', 1)[0] == 'text/event-stream':
-            source, connection = upstream, client
+            # The stream reads no database: release this worker's connection now instead of
+            # holding it for the stream's life (docs/teamcomms.md § Worker pools).
+            connection.close()
+            source, tunnel = upstream, client
 
             def chunks():
                 try:
@@ -230,12 +234,12 @@ def proxy(request, subpath=''):
                     yield b'event: error\ndata: {"error":"TeamComms tunnel unavailable","status":502}\n\n'
                 finally:
                     source.close()
-                    connection.close()
+                    tunnel.close()
 
             response = StreamingHttpResponse(chunks(), status=upstream.status_code,
                                              content_type='text/event-stream')
             # Close even when the downstream disconnects before iteration.
-            response._resource_closers.extend([source.close, connection.close])
+            response._resource_closers.extend([source.close, tunnel.close])
             response['X-Accel-Buffering'] = 'no'
             _response_headers(upstream, response)
             upstream = client = None
